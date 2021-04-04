@@ -7,7 +7,7 @@ use scry_isa::{Parser, Instruction};
 fn parse_assembly(asm: &str) -> Result<Instruction, usize>
 {
 	let tokens: Vec<_> = asm.split_ascii_whitespace().collect();
-	Instruction::parse(tokens.as_ref()).map(|(instr,_)| instr)
+	Instruction::parse(tokens.iter().cloned()).map(|(instr,_)| instr)
 }
 
 /// Tests snippets of assembly.
@@ -34,3 +34,4 @@ macro_rules! test_assembly {
 }
 
 mod jmp;
+mod ret;

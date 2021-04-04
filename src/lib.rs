@@ -209,8 +209,6 @@ macro_rules! map_mnemonics {
         ];
         
         impl Instruction {
-            
-            
             pub fn mnemonic(&self) -> &'static str
             {
                 use Instruction::*;
@@ -226,7 +224,7 @@ macro_rules! map_mnemonics {
         {
             type Internal = Instruction;
             
-            fn parse(tokens: &[&str] ) -> Result<(Self::Internal, usize), usize>
+            fn parse<'a>(mut tokens: impl Iterator<Item=&'a str>  + Clone) -> Result<(Self::Internal, usize), usize>
             {
                 use Instruction::*;
                 lazy_static!{
@@ -236,7 +234,7 @@ macro_rules! map_mnemonics {
                             mnem_pars.insert($mnem, {
                                 fn parse(tokens: &[&str] ) -> Result<(Instruction, usize), usize>
                                 {
-                                    let ($parse_result, consumed) = <$parser_type>::parse(tokens)?;
+                                    let ($parse_result, consumed) = <$parser_type>::parse(tokens.iter().cloned())?;
                                     Ok(($($instr)* , consumed))
                                 }
                                 parse
@@ -246,10 +244,10 @@ macro_rules! map_mnemonics {
                     };
                 }
                 
-                let mnemonic = tokens.iter().next().ok_or_else(|| 0usize)?;
+                let mnemonic = tokens.next().ok_or_else(|| 0usize)?;
                 if let Some(parser) = MNEMONIC_PARSERS.get(mnemonic) {
-                    let tokens = tokens.split_at(1).1;
-                    parser(tokens).map_or_else(|idx| Err(idx+1), |(instr, consumed)| Ok((instr, consumed+1)))
+                    let tokens = tokens.collect::<Vec<_>>();
+                    parser(tokens.as_ref()).map_or_else(|idx| Err(idx+1), |(instr, consumed)| Ok((instr, consumed+1)))
                 }else {
                     Err(0)
                 }
@@ -279,7 +277,7 @@ macro_rules! map_mnemonics {
 
 map_mnemonics! {
     "jmp"(Jump(imm, loc)) = {
-        (imm, loc) = Then<CommaAfterParser<ReferenceParser<7,true>>,ReferenceParser<6,false>>
+        (imm, loc) = CommaBetween<ReferenceParser<7,true>, ReferenceParser<6,false>>
     }
     "ret"(Call(CallVariant::Ret, loc)) = {
         loc = ReferenceParser<6,false>
