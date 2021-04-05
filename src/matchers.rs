@@ -1,4 +1,4 @@
-use crate::{Bits};
+use crate::instructions::Bits;
 use std::marker::PhantomData;
 
 pub trait Parser
