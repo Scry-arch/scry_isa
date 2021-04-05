@@ -1,6 +1,11 @@
-use scry_isa::Parser;
-mod instructions;
 
+#[macro_use(quickcheck)]
+extern crate quickcheck_macros;
+
+mod instructions;
+mod properties;
+
+use scry_isa::Parser;
 #[test]
 fn test() {
 	let (instr, _ ) = scry_isa::Instruction::parse(["jmp", "0,", "0"].iter().cloned()).unwrap();
@@ -12,4 +17,6 @@ fn test() {
 	let mut buff = String::new();
 	scry_isa::Instruction::print(&instr,&mut buff).unwrap();
 	assert_eq!(buff, "ret 3");
+	
+	
 }

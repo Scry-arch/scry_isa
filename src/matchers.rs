@@ -14,17 +14,11 @@ pub struct ReferenceParser<const SIZE: u32, const SIGNED: bool>();
 
 impl<const SIZE: u32, const SIGNED: bool> Parser for ReferenceParser<SIZE, SIGNED>
 {
-	type Internal = Bits<SIZE>;
+	type Internal = Bits<SIZE, SIGNED>;
 	fn parse<'a>(mut tokens: impl Iterator<Item=&'a str>  + Clone) -> Result<(Self::Internal, usize), usize>
 	{
 		let value = tokens.next().ok_or_else(|| 0usize)?;
-		if SIGNED {
-			Bits::new_signed(value.parse().map_err(|_|0usize)?)
-		}else {
-			Bits::new_unsigned(value.parse().map_err(|_|0usize)?)
-		}.map_or_else(||Err(0), |b|{
-			Ok((b,1))
-		})
+		Bits::new(value.parse().map_err(|_|0usize)?).map_or_else(||Err(0), |b|{Ok((b,1))})
 	}
 	
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result

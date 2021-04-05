@@ -4,5 +4,5 @@ mod instructions;
 mod assembly;
 
 pub use matchers::Parser;
-pub use instructions::Instruction;
+pub use instructions::*;
 
