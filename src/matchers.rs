@@ -49,15 +49,10 @@ impl<P1:Parser, P2: Parser> Parser for CommaBetween<P1, P2>
 			count+=1;
 			if t.contains(",") {
 				let mut split = t.splitn(2, ",");
-				let first = split.next().filter(|string| string != &"");
-				let second = split.next().filter(|string| string != &"");
 				
-				if t.starts_with(",") {
-					first_after = first.or(second);
-				} else {
-					last_before = first;
-					first_after = second;
-				}
+				last_before = split.next();
+				first_after = split.next().filter(|string| string != &"");
+				
 				found_comma = true;
 				false
 			} else {

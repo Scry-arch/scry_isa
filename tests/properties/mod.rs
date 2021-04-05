@@ -1,4 +1,6 @@
 use scry_isa::{Instruction, Parser};
+use quickcheck::{TestResult, Gen, Arbitrary};
+use rand::seq::SliceRandom;
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
@@ -24,5 +26,104 @@ fn print_then_parse(instr: Instruction) -> bool
 				false
 			}
 		}
+	}
+}
+
+/// Tests that the number of tokens consumed by parsing is exactly equal
+/// to the tokens in the instruction.
+/// I.e. ensures that tokens after the instruction are ignored.
+#[quickcheck]
+fn consumes_only_instruction_tokens(instr: Instruction, extra: String) -> bool
+{
+	let mut buffer = String::new();
+	Instruction::print(&instr,&mut buffer).unwrap();
+	
+	let instr_tokens: Vec<_> = buffer.split(" ").collect();
+	let extra_tokens: Vec<_> = extra.split(" ").collect();
+	
+	let (_, consumed) = Instruction::parse(instr_tokens.iter().cloned().chain(extra_tokens.into_iter())).unwrap();
+	
+	consumed == instr_tokens.len()
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CommaType {
+	AtEnd, AtStart, InMiddle, Alone
+}
+
+impl Arbitrary for CommaType {
+	fn arbitrary<G: Gen>(g: &mut G) -> Self {
+		use CommaType::*;
+		*[AtEnd, AtStart, InMiddle, Alone].choose(g).unwrap()
+	}
+}
+
+/// Tests that all possible comma combinations are supported for any instruction
+/// with commas:
+/// 1. Comma as the end of a token with other text.
+/// 1. Comma alone as a token.
+/// 1. Comma as the start of a token with other text.
+/// 1. Comma in the middle of a token, with text on both sides.
+#[quickcheck]
+fn different_commas(instr: Instruction, t1: CommaType, t_rest: Vec<CommaType>) -> quickcheck::TestResult
+{
+	let mut buffer = String::new();
+	Instruction::print(&instr,&mut buffer).unwrap();
+	
+	// We make an infinite iterator producing comma types for use in the following loop.
+	// We do this to ensure some variety to the types each match block gets.
+	let mut comma_types = Some(t1).into_iter().chain(t_rest.into_iter()).cycle();
+	
+	if buffer.contains(",") {
+		let mut new_buffer = String::new();
+		
+		for t in buffer.split(",") {
+			use CommaType::*;
+			if new_buffer.ends_with(" ") {
+				// Is Alone or AtStart(of next token)
+				match comma_types.next().unwrap() {
+					AtEnd | InMiddle => {
+						// Remove the space and replace with comma
+						new_buffer.pop().unwrap();
+						new_buffer.push(',');
+					},
+					_ => (),
+				}
+				new_buffer.push_str(t);
+			} else {
+				if t.starts_with(" ") {
+					// Comma is AtEnd (of prev token) or Alone
+					new_buffer.push(',');
+					match comma_types.next().unwrap() {
+						AtStart | InMiddle => {
+							// Remove space
+							new_buffer.push_str(&t[1..]);
+						},
+						_ => new_buffer.push_str(t),
+					}
+				} else if !new_buffer.is_empty(){
+					// Comma is InMiddle
+					match comma_types.next().unwrap() {
+						AtStart => {
+							new_buffer.push_str(" ,");
+						},
+						AtEnd => {
+							new_buffer.push_str(", ");
+						},
+						Alone => {
+							new_buffer.push_str(" , ");
+						},
+						InMiddle => new_buffer.push(','),
+					}
+					new_buffer.push_str(t)
+				} else {
+					assert!(new_buffer.is_empty());
+					new_buffer.push_str(t)
+				}
+			}
+		}
+		TestResult::from_bool(Instruction::parse(new_buffer.split(" ").into_iter()).is_ok())
+	} else {
+		TestResult::discard()
 	}
 }
