@@ -1,5 +1,8 @@
 use crate::instructions::Bits;
 use std::marker::PhantomData;
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Write;
+use std::cmp::max;
 
 pub trait Parser
 {
@@ -24,11 +27,7 @@ impl<const SIZE: u32, const SIGNED: bool> Parser for ReferenceParser<SIZE, SIGNE
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
 	{
 		out.write_str(
-			if SIGNED {
-				internal.value().to_string()
-			} else {
-				(internal.value() as u16).to_string()
-			}.as_str()
+			internal.value().to_string().as_str()
 		)
 	}
 }
@@ -77,7 +76,7 @@ impl<P1:Parser, P2: Parser> Parser for CommaBetween<P1, P2>
 	}
 }
 
-pub struct Then<P1: Parser, P2: Parser>(PhantomData<P1>, PhantomData<P2>);
+pub struct Then<P1: Parser, P2: Parser>(PhantomData<(P1,P2)>);
 impl<P1: Parser, P2: Parser> Parser for Then<P1,P2>
 {
 	type Internal = (P1::Internal, P2::Internal);
@@ -98,5 +97,34 @@ impl<P1: Parser, P2: Parser> Parser for Then<P1,P2>
 		P1::print(&internal.0, out)?;
 		out.write_str(" ")?;
 		P2::print(&internal.1,out)
+	}
+}
+
+pub struct Or<P1: Parser, P2: Parser>(PhantomData<(P1,P2)>)
+	where P1::Internal: TryFrom<P2::Internal>;
+impl<P1: Parser, P2: Parser> Parser for Or<P1,P2>
+	where P1::Internal: TryFrom<P2::Internal>
+{
+	type Internal = P1::Internal;
+	
+	fn parse<'a>(tokens: impl Iterator<Item=&'a str> + Clone) -> Result<(Self::Internal, usize), usize> {
+		match P1::parse(tokens.clone()) {
+			Ok(result) => Ok(result),
+			Err(idx1) => {
+				match P2::parse(tokens) {
+					Ok((parsed, consumed)) => {
+						match parsed.try_into() {
+							Ok(result) => Ok((result, consumed)),
+							_ => Err(0)
+						}
+					},
+					Err(idx2) => Err(max(idx1, idx2))
+				}
+			}
+		}
+	}
+	
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result {
+		P1::print(internal, out)
 	}
 }

@@ -150,7 +150,10 @@ macro_rules! map_mnemonics {
 
 map_mnemonics! {
     "jmp"(Jump(imm, loc)) = {
-        (imm, loc) = CommaBetween<ReferenceParser<7,true>, ReferenceParser<6,false>>
+        (imm, loc) = Or<
+            CommaBetween<ReferenceParser<7,true>, ReferenceParser<6,false>>,
+            ReferenceParser<13,false>
+        >
     }
     "ret"(Call(CallVariant::Ret, loc)) = {
         loc = ReferenceParser<6,false>

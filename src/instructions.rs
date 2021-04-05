@@ -1,6 +1,8 @@
 use duplicate::{duplicate_inline};
 use quickcheck::{Arbitrary, Gen};
 use rand::Rng;
+use std::convert::TryFrom;
+use std::ops::{BitAnd, BitXor};
 
 /// Represents a set of N bits.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
@@ -56,6 +58,59 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED> {
 				Self::cleared().value
 			}
 		}}
+	}
+}
+
+impl<
+	const N: u32,
+	const SIGNED: bool,
+	const N1: u32,
+	const SIGNED1: bool,
+	const N2: u32,
+	const SIGNED2: bool
+> TryFrom<(Bits<N1,SIGNED1>, Bits<N2, SIGNED2>)>
+	for Bits<N, SIGNED>
+{
+	type Error = ();
+	
+	fn try_from((high, low): (Bits<N1, SIGNED1>, Bits<N2, SIGNED2>)) -> Result<Self, Self::Error> {
+		if N == (N1 + N2) {
+			let mut result = high.value;
+			result <<= N1;
+			result += low.value;
+			Ok(Self{value: result})
+		} else {
+			Err(())
+		}
+	}
+}
+
+impl<
+	const N: u32,
+	const SIGNED: bool,
+	const N1: u32,
+	const SIGNED1: bool,
+	const N2: u32,
+	const SIGNED2: bool
+> TryFrom<Bits<N, SIGNED>>
+for (Bits<N1,SIGNED1>, Bits<N2, SIGNED2>)
+{
+	type Error = ();
+	
+	fn try_from(value: Bits<N, SIGNED>) -> Result<Self, Self::Error> {
+		if N == (N1 + N2) {
+			let low_value = value.value.bitand(Bits::<N2,false>::saturated().value);
+			let mut high_value = value.value.bitand(
+				Bits::<N2,false>::saturated().value.bitxor(-1)
+			) >> N2;
+			if high_value >= Bits::<N1,SIGNED1>::max().value {
+				// Must be negative
+				high_value += Bits::<N1,false>::saturated().value.bitxor(-1);
+			}
+			Ok((Bits{ value: high_value}, Bits{value: low_value}))
+		} else {
+			Err(())
+		}
 	}
 }
 
