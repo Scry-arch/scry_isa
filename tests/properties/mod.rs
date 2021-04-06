@@ -127,3 +127,30 @@ fn different_commas(instr: Instruction, t1: CommaType, t_rest: Vec<CommaType>) -
 		TestResult::discard()
 	}
 }
+
+/// Tests that if parsing fails because of bad syntax, the reported index is always within
+/// the tokens of the instruction
+#[quickcheck]
+fn error_index_only_in_instruction(instr: Instruction, inject: char, mut inject_idx: usize, postfix: String) -> TestResult
+{
+	let mut buffer = String::new();
+	Instruction::print(&instr,&mut buffer).unwrap();
+	
+	// We also count commas because they can be on their own, but the default
+	// print puts at adjacent to teh previous token, which means space counting
+	// doesn't count the comma.
+	let instr_token_count = buffer.split(" ").count() + (buffer.split(",").count() - 1);
+
+	// Inject string at next char boundary
+	inject_idx = inject_idx % buffer.as_str().len();
+	while !buffer.as_str().is_char_boundary(inject_idx) {
+		inject_idx += 1;
+	}
+	buffer.insert(inject_idx, inject);
+	
+	buffer.push_str(postfix.as_str());
+	
+	Instruction::parse(buffer.split(" ").into_iter()).map_or_else(
+		|idx| TestResult::from_bool(idx < instr_token_count),
+		|_| TestResult::discard())
+}

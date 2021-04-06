@@ -1,32 +1,29 @@
 use std::collections::HashMap;
 use lazy_static::lazy_static;
-use crate::{
-    matchers::*,
-    instructions::*
-};
+use crate::{matchers::*, instructions::*};
 
 macro_rules! map_mnemonics {
     (
         $mnem1:literal( $($instr1:tt)* ) = {
-            $parse_result1:tt = $parser_type1:ty
+            $parse_result1:tt <= $parser_type1:ty  => $print_as1:tt
         }
         $(
             $mnem:literal( $($instr:tt)* ) = {
-                $parse_result:tt = $parser_type:ty
+                $parse_result:tt <= $parser_type:ty => $print_as:tt
             }
         )*
     ) => {
         map_mnemonics!{
             @indexify[
-                0
+                [0]
                 $mnem1 ( $($instr1)* ) = {
-                    $parse_result1 = $parser_type1
+                    $parse_result1 <= $parser_type1 => $print_as1
                 }
             ]
             [1]
             $(
                 $mnem ( $($instr)* ) = {
-                    $parse_result = $parser_type
+                    $parse_result <= $parser_type => $print_as
                 }
             )*
         }
@@ -36,26 +33,26 @@ macro_rules! map_mnemonics {
         @indexify[$($prev:tt)*]
         [$idx:expr]
         $mnem1:literal( $($instr1:tt)* ) = {
-            $parse_result1:tt = $parser_type1:ty
+            $parse_result1:tt <= $parser_type1:ty => $print_as1:tt
         }
         $(
             $mnem:literal( $($instr:tt)* ) = {
-                $parse_result:tt = $parser_type:ty
+                $parse_result:tt <= $parser_type:ty => $print_as:tt
             }
         )*
     ) => {
         map_mnemonics!{
             @indexify[
                 $($prev)*
-                $idx
+                [$idx]
                 $mnem1 ( $($instr1)* ) = {
-                    $parse_result1 = $parser_type1
+                    $parse_result1 <= $parser_type1 => $print_as1
                 }
             ]
-            [($idx+1)]
+            [$idx+1]
             $(
                 $mnem ( $($instr)* ) = {
-                    $parse_result = $parser_type
+                    $parse_result <= $parser_type => $print_as
                 }
             )*
         }
@@ -63,7 +60,7 @@ macro_rules! map_mnemonics {
     
     (
         @indexify[$($prev:tt)*]
-        $idx:expr
+        [$idx:expr]
     ) => {
         map_mnemonics!{
             $($prev)*
@@ -71,9 +68,9 @@ macro_rules! map_mnemonics {
     };
     
     (
-        $(  $idx:literal
+        $(  [$idx:expr]
             $mnem:literal( $($instr:tt)* ) = {
-                $parse_result:tt = $parser_type:ty
+                $parse_result:tt <= $parser_type:ty => $print_as:tt
             }
         )*
     ) => {
@@ -135,27 +132,36 @@ macro_rules! map_mnemonics {
                 
                 match internal {
                     $(
-                        $($instr)* => {<$parser_type>::print(& map_mnemonics!{@refify $parse_result}, out)}
+                        $($instr)* => {<$parser_type>::print(& $print_as, out )}
                     )*
                     _ => todo!()
                 }
             }
         }
     };
-    
-    (@refify ( $($id:expr),* )) => {( $(*$id),* )};
-    (@refify $id:expr) => {$id};
-    
 }
 
 map_mnemonics! {
     "jmp"(Jump(imm, loc)) = {
-        (imm, loc) = Or<
+        (imm, loc) <= Or<
             CommaBetween<ReferenceParser<7,true>, ReferenceParser<6,false>>,
             ReferenceParser<13,false>
         >
+        => (*imm, *loc)
     }
     "ret"(Call(CallVariant::Ret, loc)) = {
-        loc = ReferenceParser<6,false>
+        loc <= ReferenceParser<6,false> => loc
+    }
+    "echo"(Echo(tar1,tar2,next)) = {
+        (tar1,((),(tar2,next))) <= Then<
+            ReferenceParser<5,false>,
+            Then<
+                Comma,
+                Then<
+                    ReferenceParser<5,false>,
+                    BoolFlag<Then<Comma, Arrow>>
+                >,
+           >
+        > => (*tar1,((),(*tar2,*next)))
     }
 }

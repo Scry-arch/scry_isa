@@ -225,9 +225,10 @@ impl Arbitrary for Instruction
 {
 	fn arbitrary<G: Gen>(g: &mut G) -> Self {
 		use Instruction::*;
-		match g.gen_range(0, 2) {
+		match g.gen_range(0, 3) {
 			0 => Jump(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			1 => Call(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			2 => Echo(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			x => panic!("Unsupported: {}", x)
 		}
 	}
