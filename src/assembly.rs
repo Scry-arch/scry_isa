@@ -4,27 +4,39 @@ use crate::{matchers::*, instructions::*};
 
 macro_rules! map_mnemonics {
     (
-        $mnem1:literal( $($instr1:tt)* ) = {
-            $parse_result1:tt <= $parser_type1:ty  => $print_as1:tt
-        }
+        $mnem1:literal
         $(
-            $mnem:literal( $($instr:tt)* ) = {
-                $parse_result:tt <= $parser_type:ty => $print_as:tt
+            ( $($instr1:tt)* ) = {
+                $parse_result1:tt <= $parser_type1:ty  => $print_as1:tt
             }
+        )+
+        $(
+            $mnem:literal
+            $(
+                ( $($instr:tt)* ) = {
+                    $parse_result:tt <= $parser_type:ty => $print_as:tt
+                }
+            )+
         )*
     ) => {
         map_mnemonics!{
             @indexify[
                 [0]
-                $mnem1 ( $($instr1)* ) = {
-                    $parse_result1 <= $parser_type1 => $print_as1
-                }
+                $mnem1
+                $(
+                    ( $($instr1)* ) = {
+                        $parse_result1 <= $parser_type1 => $print_as1
+                    }
+                )+
             ]
             [1]
             $(
-                $mnem ( $($instr)* ) = {
-                    $parse_result <= $parser_type => $print_as
-                }
+                $mnem
+                $(
+                    ( $($instr)* ) = {
+                        $parse_result <= $parser_type => $print_as
+                    }
+                )+
             )*
         }
     };
@@ -32,28 +44,40 @@ macro_rules! map_mnemonics {
     (
         @indexify[$($prev:tt)*]
         [$idx:expr]
-        $mnem1:literal( $($instr1:tt)* ) = {
-            $parse_result1:tt <= $parser_type1:ty => $print_as1:tt
-        }
+        $mnem1:literal
         $(
-            $mnem:literal( $($instr:tt)* ) = {
-                $parse_result:tt <= $parser_type:ty => $print_as:tt
+            ( $($instr1:tt)* ) = {
+                $parse_result1:tt <= $parser_type1:ty => $print_as1:tt
             }
+        )+
+        $(
+            $mnem:literal
+            $(
+                ( $($instr:tt)* ) = {
+                    $parse_result:tt <= $parser_type:ty => $print_as:tt
+                }
+            )+
         )*
     ) => {
         map_mnemonics!{
             @indexify[
                 $($prev)*
                 [$idx]
-                $mnem1 ( $($instr1)* ) = {
-                    $parse_result1 <= $parser_type1 => $print_as1
-                }
+                $mnem1
+                $(
+                    ( $($instr1)* ) = {
+                        $parse_result1 <= $parser_type1 => $print_as1
+                    }
+                )+
             ]
             [$idx+1]
             $(
-                $mnem ( $($instr)* ) = {
-                    $parse_result <= $parser_type => $print_as
-                }
+                $mnem
+                $(
+                    ( $($instr)* ) = {
+                        $parse_result <= $parser_type => $print_as
+                    }
+                )+
             )*
         }
     };
@@ -69,9 +93,12 @@ macro_rules! map_mnemonics {
     
     (
         $(  [$idx:expr]
-            $mnem:literal( $($instr:tt)* ) = {
-                $parse_result:tt <= $parser_type:ty => $print_as:tt
-            }
+            $mnem:literal
+            $(
+                ( $($instr:tt)* ) = {
+                    $parse_result:tt <= $parser_type:ty => $print_as:tt
+                }
+            )+
         )*
     ) => {
         const INSTRUCTION_MNEMONICS: &'static [&'static str] = &[
@@ -79,13 +106,14 @@ macro_rules! map_mnemonics {
         ];
         
         impl Instruction {
+            /// Returns the mnemonic for this instruction.
+            /// I.e. the mnemonic for load instructions if "ld".
             pub fn mnemonic(&self) -> &'static str
             {
                 use Instruction::*;
                 #[allow(unused_variables)]
                 match self {
-                    $($($instr)* => INSTRUCTION_MNEMONICS[$idx],)*
-                    _ => todo!(),
+                    $($($($instr)* => INSTRUCTION_MNEMONICS[$idx],)+)*
                 }
             }
         }
@@ -104,8 +132,22 @@ macro_rules! map_mnemonics {
                             mnem_pars.insert($mnem, {
                                 fn parse(tokens: &[&str] ) -> Result<(Instruction, usize), usize>
                                 {
-                                    let ($parse_result, consumed) = <$parser_type>::parse(tokens.iter().cloned())?;
-                                    Ok(($($instr)* , consumed))
+                                    let mut furthest_error_idx = 0;
+                                    let (result, consumed) =
+                                    $(
+                                        if let Ok(($parse_result, consumed)) = <$parser_type>::parse(tokens.iter().cloned())
+                                            .or_else(|error_idx| {
+                                                furthest_error_idx = std::cmp::max(furthest_error_idx, error_idx);
+                                                Err(0)
+                                            })
+                                        {
+                                            Result::<(Instruction, usize), usize>::Ok(($($instr)* , consumed))
+                                        } else
+                                    )+
+                                    {
+                                        return Err(furthest_error_idx)
+                                    }?;
+                                    Ok((result, consumed))
                                 }
                                 parse
                             });
@@ -132,13 +174,16 @@ macro_rules! map_mnemonics {
                 
                 match internal {
                     $(
-                        $($instr)* => {<$parser_type>::print(& $print_as, out )}
+                        $(
+                            $($instr)* => {<$parser_type>::print(& $print_as, out )}
+                        )+
                     )*
-                    _ => todo!()
                 }
             }
         }
     };
+    
+    (@throw_out $($tokens:tt)*) =>{}
 }
 
 map_mnemonics! {
@@ -152,7 +197,8 @@ map_mnemonics! {
     "ret"(Call(CallVariant::Ret, loc)) = {
         loc <= ReferenceParser<6,false> => loc
     }
-    "echo"(Echo(tar1,tar2,next)) = {
+    "echo"
+    (Echo(tar1,tar2,next)) = {
         (tar1,((),(tar2,next))) <= Then<
             ReferenceParser<5,false>,
             Then<
@@ -163,5 +209,8 @@ map_mnemonics! {
                 >,
            >
         > => (*tar1,((),(*tar2,*next)))
+    }
+    (EchoLong(target)) = {
+        target <= ReferenceParser<10,false> => target
     }
 }

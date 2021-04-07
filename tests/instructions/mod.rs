@@ -60,3 +60,4 @@ macro_rules! test_assembly {
 mod jmp;
 mod ret;
 mod echo;
+mod load;

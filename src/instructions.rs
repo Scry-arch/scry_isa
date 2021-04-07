@@ -3,6 +3,7 @@ use quickcheck::{Arbitrary, Gen};
 use rand::Rng;
 use std::convert::TryFrom;
 use std::ops::{BitAnd, BitXor};
+use variant_count::VariantCount;
 
 /// Represents a set of N bits.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
@@ -162,7 +163,7 @@ duplicate_inline! {
 }
 
 /// All instructions
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, VariantCount)]
 pub enum Instruction {
 	/// The jump instruction.
 	///
@@ -171,15 +172,15 @@ pub enum Instruction {
 	/// 0. The branch location offset.
 	Jump(Bits<7,true>,Bits<6,false>),
 	
-	/// load instruction.
-	///
-	/// Fields
-	/// 0. Whether the loaded value is signed.
-	/// 0. The length of the loaded value.
-	/// 0. The size of the loaded value.
-	/// 0. Whether the primary address space is the target.
-	/// 0. The "ar" flags.
-	Load(bool, Bits<3,false>, Bits<3,false>,bool, Bits<2,false>),
+	// load instruction.
+	//
+	// Fields
+	// 0. Whether the loaded value is signed.
+	// 0. The length of the loaded value.
+	// 0. The size of the loaded value.
+	// 0. Whether the primary address space is the target.
+	// 0. The "ar" flags.
+	// Load(bool, Bits<3,false>, Bits<3,false>,bool, Bits<2,false>),
 	
 	/// The echo instruction.
 	///
@@ -189,13 +190,19 @@ pub enum Instruction {
 	/// 0. Whether the remaining inputs should be output to the the next instruction.
 	Echo(Bits<5,false>, Bits<5,false>, bool),
 	
-	/// The ALU instruction.
+	/// The long echo instruction.
 	///
 	/// Fields:
 	/// 0. Output target.
-	/// 0. Function specifier.
-	/// 0. Modifier.
-	Alu(Bits<5,false>, Bits<4,false>, Bits<3,false>),
+	EchoLong(Bits<10,false>),
+	
+	// The ALU instruction.
+	//
+	// Fields:
+	// 0. Output target.
+	// 0. Function specifier.
+	// 0. Modifier.
+	// Alu(Bits<5,false>, Bits<4,false>, Bits<3,false>),
 	
 	/// The call instruction.
 	///
@@ -225,10 +232,11 @@ impl Arbitrary for Instruction
 {
 	fn arbitrary<G: Gen>(g: &mut G) -> Self {
 		use Instruction::*;
-		match g.gen_range(0, 3) {
+		match g.gen_range(0, Instruction::VARIANT_COUNT) {
 			0 => Jump(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			1 => Call(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			2 => Echo(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			3 => EchoLong(Arbitrary::arbitrary(g)),
 			x => panic!("Unsupported: {}", x)
 		}
 	}
