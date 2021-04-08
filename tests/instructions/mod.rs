@@ -61,3 +61,4 @@ mod jmp;
 mod ret;
 mod echo;
 mod load;
+mod alu;

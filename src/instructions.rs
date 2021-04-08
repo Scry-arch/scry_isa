@@ -124,38 +124,20 @@ impl<const N: u32, const SIGNED: bool> Arbitrary for Bits<N, SIGNED>
 
 duplicate_inline! {
 	[
-		// variants; [Call, Portal, Ret, Trap];
-		variants; [Ret];
+		name 					variants;
+		[AluVariant]			[Inc, Dec, Add, Sub, ShiftLeft, ShiftRight, RotateLeft, RotateRight];
+		[CallVariant]			[Ret]; //[Call, Portal, Ret, Trap]
+		[StackControlVariant] 	[Reserve, Free];
 	]
-	/// Variants of the call instruction
 	#[derive(Debug, Clone, Eq, PartialEq)]
-	pub enum CallVariant {
+	pub enum name {
 		variants
 	}
 	
-	impl Arbitrary for CallVariant
+	impl Arbitrary for name
 	{
 		fn arbitrary<G: Gen>(g: &mut G) -> Self {
-			use CallVariant::*;
-			use rand::seq::SliceRandom;
-			[variants].choose(g).unwrap().clone()
-		}
-	}
-}
-
-duplicate_inline! {
-	[
-		variants; [Reserve, Free];
-	]
-	#[derive(Debug, Clone, Eq, PartialEq)]
-	pub enum StackControlVariant {
-		variants
-	}
-	
-	impl Arbitrary for StackControlVariant
-	{
-		fn arbitrary<G: Gen>(g: &mut G) -> Self {
-			use StackControlVariant::*;
+			use name::*;
 			use rand::seq::SliceRandom;
 			[variants].choose(g).unwrap().clone()
 		}
@@ -196,13 +178,11 @@ pub enum Instruction {
 	/// 0. Output target.
 	EchoLong(Bits<10,false>),
 	
-	// The ALU instruction.
-	//
-	// Fields:
-	// 0. Output target.
-	// 0. Function specifier.
-	// 0. Modifier.
-	// Alu(Bits<5,false>, Bits<4,false>, Bits<3,false>),
+	/// The single-output ALU instruction.
+	///
+	/// Fields:
+	/// 0. Output target.
+	Alu(AluVariant, Bits<5,false>),
 	
 	/// The call instruction.
 	///
@@ -237,6 +217,7 @@ impl Arbitrary for Instruction
 			1 => Call(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			2 => Echo(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			3 => EchoLong(Arbitrary::arbitrary(g)),
+			4 => Alu(Arbitrary::arbitrary(g),Arbitrary::arbitrary(g)),
 			x => panic!("Unsupported: {}", x)
 		}
 	}

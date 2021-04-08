@@ -213,4 +213,28 @@ map_mnemonics! {
     (EchoLong(target)) = {
         target <= ReferenceParser<10,false> => target
     }
+    "inc"(Alu(AluVariant::Inc, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "dec"(Alu(AluVariant::Dec, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "add"(Alu(AluVariant::Add, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "sub"(Alu(AluVariant::Sub, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "shl"(Alu(AluVariant::ShiftLeft, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "shr"(Alu(AluVariant::ShiftRight, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "rol"(Alu(AluVariant::RotateLeft, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
+    "ror"(Alu(AluVariant::RotateRight, target)) = {
+        target <= ReferenceParser<5,false> => target
+    }
 }
