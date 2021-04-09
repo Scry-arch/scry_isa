@@ -126,10 +126,12 @@ duplicate_inline! {
 	[
 		name 					variants;
 		[AluVariant]			[Inc, Dec, Add, Sub, ShiftLeft, ShiftRight, RotateLeft, RotateRight];
+		[Alu2Variant]			[Add, Sub, ShiftLeft, ShiftRight];
+		[Alu2OutputVariant]		[High, Low, FirstLow, FirstHigh, NextHigh, NextLow];
 		[CallVariant]			[Ret]; //[Call, Portal, Ret, Trap]
 		[StackControlVariant] 	[Reserve, Free];
 	]
-	#[derive(Debug, Clone, Eq, PartialEq)]
+	#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 	pub enum name {
 		variants
 	}
@@ -184,6 +186,12 @@ pub enum Instruction {
 	/// 0. Output target.
 	Alu(AluVariant, Bits<5,false>),
 	
+	/// The single-output ALU instruction.
+	///
+	/// Fields:
+	/// 0. Output target.
+	Alu2(Alu2Variant, Alu2OutputVariant, Bits<5,false>),
+	
 	/// The call instruction.
 	///
 	/// Fields:
@@ -218,6 +226,7 @@ impl Arbitrary for Instruction
 			2 => Echo(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			3 => EchoLong(Arbitrary::arbitrary(g)),
 			4 => Alu(Arbitrary::arbitrary(g),Arbitrary::arbitrary(g)),
+			5 => Alu2(Arbitrary::arbitrary(g),Arbitrary::arbitrary(g),Arbitrary::arbitrary(g)),
 			x => panic!("Unsupported: {}", x)
 		}
 	}

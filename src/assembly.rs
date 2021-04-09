@@ -10,6 +10,7 @@ macro_rules! map_mnemonics {
     ) => {
         map_mnemonics_impl!{
             @extract[]
+            @wip[]
             $mnem1
             $($rest)+
         }
@@ -20,200 +21,16 @@ macro_rules! map_mnemonics_impl {
     
     (
         @extract []
+        @wip[]
         $mnem:literal
         $($rest:tt)*
     ) => {
         map_mnemonics_impl!{
-            @extract[
+            @extract []
+            @wip[
                 [
                     @mnemonic [ $mnem ]
                 ]
-            ]
-            $($rest)*
-        }
-    };
-    
-    (
-        @extract [
-            [
-                @mnemonic [ $mnem_old:literal ]
-                $(
-                    @instruction [$($instr:tt)*]
-                    @parser [ $parser_type:ty ]
-                    @result [ $parse_result:tt ]
-                    @print_as [ $print_as:tt ]
-                )+
-            ]
-            $($extracted:tt)*
-        ]
-        $mnem:literal
-        $($rest:tt)*
-    ) => {
-        map_mnemonics_impl!{
-            @extract[
-                [
-                    @mnemonic [ $mnem ]
-                ]
-                [
-                    @mnemonic [ $mnem_old ]
-                    $(
-                        @instruction [$($instr)*]
-                        @parser [ $parser_type ]
-                        @result [ $parse_result ]
-                        @print_as [ $print_as ]
-                    )+
-                ]
-                $($extracted)*
-            ]
-            $($rest)*
-        }
-    };
-    
-    (
-        @extract [
-            [
-                @mnemonic [ $mnem:literal ]
-                $(
-                    @instruction [$($instr1:tt)*]
-                    @parser [ $parser_type1:ty ]
-                    @result [ $parse_result1:tt ]
-                    @print_as [ $print_as1:tt ]
-                )*
-            ]
-            $($extracted:tt)*
-        ]
-        ( $($instr:tt)* ) = {
-            $parse_result:tt <= $parser_type:ty  => $print_as:tt
-        }
-        $($rest:tt)*
-    ) => {
-        map_mnemonics_impl!{
-            @extract[
-                [
-                    @mnemonic [ $mnem ]
-                    $(
-                        @instruction [$($instr1)*]
-                        @parser [ $parser_type1 ]
-                        @result [ $parse_result1 ]
-                        @print_as [ $print_as1 ]
-                    )*
-                    @instruction [$($instr)*]
-                    @parser [ $parser_type ]
-                    @result [ $parse_result ]
-                    @print_as [ $print_as ]
-                ]
-                $($extracted)*
-            ]
-            $($rest)*
-        }
-    };
-    
-    (
-        @extract [
-            [
-                @mnemonic [ $mnem:literal ]
-            ]
-            $($extracted:tt)*
-        ]
-        ( $($instr:tt)* ) =
-        $( $mnem_rest:literal ( $($instr_rest:tt)* ) =)+
-        {
-            $parse_result:tt <= $parser_type:ty  => $print_as:tt
-        }
-        $($rest:tt)*
-    ) => {
-        map_mnemonics_impl!{
-            @extract[
-                [
-                    @mnemonic [ $mnem ]
-                    @instruction [$($instr)*]
-                    @parser [ $parser_type ]
-                    @result [ $parse_result ]
-                    @print_as [ $print_as ]
-                ]
-                $([
-                    @mnemonic [ $mnem_rest ]
-                    @instruction [$($instr_rest)*]
-                    @parser [ $parser_type ]
-                    @result [ $parse_result ]
-                    @print_as [ $print_as ]
-                ])+
-                $($extracted)*
-            ]
-            $($rest)*
-        }
-    };
-    
-    (
-        @extract [
-            [
-                @mnemonic [ $mnem:literal ]
-                $(
-                    @instruction [$($instr1:tt)*]
-                    @parser [ $parser_type1:ty ]
-                    @result [ $parse_result1:tt ]
-                    @print_as [ $print_as1:tt ]
-                )*
-            ]
-            $($extracted:tt)*
-        ]
-        ( $($instr:tt)* ) = {
-            $parse_result:tt = $parser_type:ty
-        }
-        $($rest:tt)*
-    ) => {
-        map_mnemonics_impl!{
-            @extract[
-                [
-                    @mnemonic [ $mnem ]
-                    $(
-                        @instruction [$($instr1)*]
-                        @parser [ $parser_type1 ]
-                        @result [ $parse_result1 ]
-                        @print_as [ $print_as1 ]
-                    )*
-                    @instruction [$($instr)*]
-                    @parser [ $parser_type ]
-                    @result [ $parse_result ]
-                    @print_as [ $parse_result ]
-                ]
-                $($extracted)*
-            ]
-            $($rest)*
-        }
-    };
-    
-    (
-        @extract [
-            [
-                @mnemonic [ $mnem:literal ]
-            ]
-            $($extracted:tt)*
-        ]
-        ( $($instr:tt)* ) =
-        $( $mnem_rest:literal ( $($instr_rest:tt)* ) =)+
-        {
-            $parse_result:tt = $parser_type:ty
-        }
-        $($rest:tt)*
-    ) => {
-        map_mnemonics_impl!{
-            @extract[
-                [
-                    @mnemonic [ $mnem ]
-                    @instruction [$($instr)*]
-                    @parser [ $parser_type ]
-                    @result [ $parse_result ]
-                    @print_as [ $parse_result ]
-                ]
-                $([
-                    @mnemonic [ $mnem_rest ]
-                    @instruction [$($instr_rest)*]
-                    @parser [ $parser_type ]
-                    @result [ $parse_result ]
-                    @print_as [ $parse_result ]
-                ])+
-                $($extracted)*
             ]
             $($rest)*
         }
@@ -221,11 +38,211 @@ macro_rules! map_mnemonics_impl {
     
     (
         @extract [$($extracted:tt)*]
+        @wip [
+            $([
+                @mnemonic [ $mnem_old:literal ]
+                $([
+                    @instruction [$($instr:tt)*]
+                    @parser [ $parser_type:ty ]
+                    @result [ $parse_result:tt ]
+                    @print_as [ $print_as:tt ]
+                ])+
+            ])+
+        ]
+        $mnem:literal
+        $($rest:tt)*
+    ) => {
+        map_mnemonics_impl!{
+            @extract[
+                $($extracted)*
+                $([
+                    @mnemonic [ $mnem_old ]
+                    $([
+                        @instruction [$($instr)*]
+                        @parser [ $parser_type ]
+                        @result [ $parse_result ]
+                        @print_as [ $print_as ]
+                    ])+
+                ])+
+            ]
+            @wip [
+                [
+                    @mnemonic [ $mnem ]
+                ]
+            ]
+            $($rest)*
+        }
+    };
+    
+    (
+        @extract [$($extracted:tt)*]
+        @wip [
+            $([
+                @mnemonic [ $mnem_old:literal ]
+                $(
+                    @instruction [$($instr:tt)*]
+                )+
+            ])+
+        ]
+        $mnem:literal
+        $($rest:tt)*
+    ) => {
+        map_mnemonics_impl!{
+            @extract[
+                $($extracted)*
+            ]
+            @wip [
+                [
+                    @mnemonic [ $mnem ]
+                ]
+                $([
+                    @mnemonic [ $mnem_old ]
+                    $(
+                        @instruction [$($instr)*]
+                    )+
+                ])+
+            ]
+            $($rest)*
+        }
+    };
+    
+    (
+        @extract [$($extracted:tt)*]
+        @wip [
+            [
+                @mnemonic [ $mnem:literal ]
+                $([$($instructions_done:tt)*])*
+                $(
+                    @instruction [$($instr_old:tt)*]
+                )*
+            ]
+            $($wip:tt)*
+        ]
+        ( $($instr:tt)* ) =
+        $($rest:tt)*
+    ) => {
+        map_mnemonics_impl!{
+            @extract [$($extracted)*]
+            @wip [
+                [
+                    @mnemonic [ $mnem ]
+                    $([$($instructions_done)*])*
+                    $(
+                        @instruction [$($instr_old)*]
+                    )*
+                    @instruction [$($instr)*]
+                ]
+                $($wip)*
+            ]
+            $($rest)*
+        }
+    };
+    
+    (
+        @extract [$($extracted:tt)*]
+        @wip [
+            $([
+                @mnemonic [ $mnem:literal ]
+                $([
+                    @instruction [$($instr_done:tt)*]
+                    @parser [ $parser_type_done:ty ]
+                    @result [ $parse_result_done:tt ]
+                    @print_as [ $print_as_done:tt ]
+                ])*
+                @instruction [$($instr:tt)*]
+                $(
+                    @instruction [$($instr_rest:tt)*]
+                )*
+            ])+
+        ]
+        {
+            $parse_result:tt <= $parser_type:ty  => $print_as:tt
+        }
+        $($rest:tt)*
+    ) => {
+        map_mnemonics_impl!{
+            @extract [$($extracted)*]
+            @wip [
+                $([
+                    @mnemonic [ $mnem ]
+                    $([
+                        @instruction [$($instr_done)*]
+                        @parser [ $parser_type_done ]
+                        @result [ $parse_result_done ]
+                        @print_as [ $print_as_done ]
+                    ])*
+                    [
+                        @instruction [$($instr)*]
+                        @parser [ $parser_type ]
+                        @result [ $parse_result ]
+                        @print_as [ $print_as ]
+                    ]
+                    $(
+                        @instruction [$($instr_rest)*]
+                    )*
+                ])+
+            ]
+            $($rest)*
+        }
+    };
+    
+    (
+        @extract [$($extracted:tt)*]
+        @wip [
+            $([
+                @mnemonic [ $mnem:literal ]
+                $([
+                    @instruction [$($instr_done:tt)*]
+                    @parser [ $parser_type_done:ty ]
+                    @result [ $parse_result_done:tt ]
+                    @print_as [ $print_as_done:tt ]
+                ])*
+                @instruction [$($instr:tt)*]
+                $(
+                    @instruction [$($instr_rest:tt)*]
+                )*
+            ])+
+        ]
+        {
+            $parse_result:tt = $parser_type:ty
+        }
+        $($rest:tt)*
+    ) => {
+        map_mnemonics_impl!{
+            @extract [$($extracted)*]
+            @wip [
+                $([
+                    @mnemonic [ $mnem ]
+                    $([
+                        @instruction [$($instr_done)*]
+                        @parser [ $parser_type_done ]
+                        @result [ $parse_result_done ]
+                        @print_as [ $print_as_done ]
+                    ])*
+                    [
+                        @instruction [$($instr)*]
+                        @parser [ $parser_type ]
+                        @result [ $parse_result ]
+                        @print_as [ $parse_result ]
+                    ]
+                    $(
+                        @instruction [$($instr_rest)*]
+                    )*
+                ])+
+            ]
+            $($rest)*
+        }
+    };
+    
+    (
+        @extract [$($extracted:tt)*]
+        @wip[$($wip:tt)*]
     ) => {
         map_mnemonics_impl!{
             @indexify[]
             @next_index [ 0 ]
             $($extracted)*
+            $($wip)*
         }
     };
     
@@ -234,12 +251,12 @@ macro_rules! map_mnemonics_impl {
         @next_index [ $idx:expr ]
         [
             @mnemonic [ $mnem1:literal ]
-            $(
+            $([
                 @instruction [$($instr1:tt)*]
                 @parser [ $parser_type1:ty ]
                 @result [ $parse_result1:tt ]
                 @print_as [ $print_as1:tt ]
-            )+
+            ])+
         ]
         $($rest:tt)*
     ) => {
@@ -249,12 +266,12 @@ macro_rules! map_mnemonics_impl {
                 [
                     @index [ $idx ]
                     @mnemonic [ $mnem1 ]
-                    $(
+                    $([
                         @instruction [$($instr1)*]
                         @parser [ $parser_type1 ]
                         @result [ $parse_result1 ]
                         @print_as [ $print_as1 ]
-                    )+
+                    ])+
                 ]
             ]
             @next_index[ $idx + 1 ]
@@ -277,12 +294,12 @@ macro_rules! map_mnemonics_impl {
         $( [
             @index [ $idx:expr ]
             @mnemonic [ $mnem:literal ]
-            $(
+            $([
                 @instruction [$($instr:tt)*]
                 @parser [ $parser_type:ty ]
                 @result [ $parse_result:tt ]
                 @print_as [ $print_as:tt ]
-            )+
+            ])+
         ])*
     ) => {
         const INSTRUCTION_MNEMONICS: &'static [&'static str] = &[
@@ -305,6 +322,8 @@ macro_rules! map_mnemonics_impl {
         impl Parser for Instruction
         {
             type Internal = Instruction;
+            const ALONE_RIGHT: bool = true;
+            const ALONE_LEFT: bool = true;
             
             fn parse<'a>(mut tokens: impl Iterator<Item=&'a str>  + Clone) -> Result<(Self::Internal, usize), usize>
             {
@@ -374,7 +393,8 @@ map_mnemonics! {
     "jmp"(Jump(imm, loc)) = {
         (imm, loc) <= Or<
             CommaBetween<ReferenceParser<7,true>, ReferenceParser<6,false>>,
-            ReferenceParser<13,false>
+            ReferenceParser<13,false>,
+            _
         >
         => (*imm, *loc)
     }
@@ -389,7 +409,7 @@ map_mnemonics! {
                 Comma,
                 Then<
                     ReferenceParser<5,false>,
-                    BoolFlag<Then<Comma, Arrow>>
+                    BoolFlag<Then<Comma, Alone<Arrow>>>
                 >,
            >
         > => (*tar1,((),(*tar2,*next)))
@@ -399,13 +419,34 @@ map_mnemonics! {
     }
     "inc"(Alu(AluVariant::Inc, target)) =
     "dec"(Alu(AluVariant::Dec, target)) =
-    "add"(Alu(AluVariant::Add, target)) =
-    "sub"(Alu(AluVariant::Sub, target)) =
-    "shl"(Alu(AluVariant::ShiftLeft, target)) =
-    "shr"(Alu(AluVariant::ShiftRight, target)) =
     "rol"(Alu(AluVariant::RotateLeft, target)) =
     "ror"(Alu(AluVariant::RotateRight, target)) =
     {
         target = ReferenceParser<5,false>
     }
+    "add"
+    (Alu(AluVariant::Add, target)) =
+    (Alu2(Alu2Variant::Add, output, target)) =
+    "sub"
+    (Alu(AluVariant::Sub, target)) =
+    (Alu2(Alu2Variant::Sub, output, target)) =
+    "shl"
+    (Alu(AluVariant::ShiftLeft, target)) =
+    (Alu2(Alu2Variant::ShiftLeft, output, target)) =
+    "shr"
+    (Alu(AluVariant::ShiftRight, target)) ={
+        target = ReferenceParser<5,false>
+    }
+    (Alu2(Alu2Variant::ShiftRight, output, target)) ={
+        (output, target) <= Then<
+            Flatten<Then<
+                Flag<Ident<High>, Ident<Low>>,
+                Maybe<
+                    Then<Flag<Arrow, Plus>, Flag<Ident<High>, Ident<Low>>>
+		        >,
+            >, _>,
+            ReferenceParser<5,false>
+        > => (*output, *target)
+    }
+    
 }
