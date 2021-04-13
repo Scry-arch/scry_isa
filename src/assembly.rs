@@ -329,40 +329,41 @@ macro_rules! map_mnemonics_impl {
             {
                 use Instruction::*;
                 lazy_static!{
-                    static ref MNEMONIC_PARSERS: HashMap<&'static str, fn(&[&str]) -> std::result::Result<(Instruction, usize), usize>> = {
-                        let mut mnem_pars:  HashMap<&'static str, fn(&[&str]) -> std::result::Result<(Instruction, usize), usize>>  = HashMap::new();
+                    static ref MNEMONIC_PARSERS: HashMap<&'static str, u16> = {
+                        let mut mnem_pars:  HashMap<&'static str, u16>  = HashMap::new();
                         $(
-                            mnem_pars.insert($mnem, {
-                                fn parse(tokens: &[&str] ) -> Result<(Instruction, usize), usize>
-                                {
-                                    let mut furthest_error_idx = 0;
-                                    let (result, consumed) =
-                                    $(
-                                        if let Ok(($parse_result, consumed)) = <$parser_type>::parse(tokens.iter().cloned())
-                                            .or_else(|error_idx| {
-                                                furthest_error_idx = std::cmp::max(furthest_error_idx, error_idx);
-                                                Err(0)
-                                            })
-                                        {
-                                            Result::<(Instruction, usize), usize>::Ok(($($instr)* , consumed))
-                                        } else
-                                    )+
-                                    {
-                                        return Err(furthest_error_idx)
-                                    }?;
-                                    Ok((result, consumed))
-                                }
-                                parse
-                            });
+                            mnem_pars.insert($mnem, $idx);
                         )*
                         mnem_pars
                     };
                 }
                 
                 let mnemonic = tokens.next().ok_or_else(|| 0usize)?;
-                if let Some(parser) = MNEMONIC_PARSERS.get(mnemonic) {
-                    let tokens = tokens.collect::<Vec<_>>();
-                    parser(tokens.as_ref()).map_or_else(|idx| Err(idx+1), |(instr, consumed)| Ok((instr, consumed+1)))
+                if let Some(parser_idx) = MNEMONIC_PARSERS.get(mnemonic) {
+                    $(
+                        if *parser_idx == ($idx) {
+                            let mut furthest_error_idx = 0;
+                            let (result, consumed) =
+                            $(
+                                if let Ok(($parse_result, consumed)) = <$parser_type>::parse(tokens.clone())
+                                    .or_else(|error_idx| {
+                                        furthest_error_idx = std::cmp::max(furthest_error_idx, error_idx);
+                                        Err(0)
+                                    })
+                                {
+                                    Result::<(Instruction, usize), usize>::Ok(($($instr)* , consumed))
+                                } else
+                            )+
+                            {
+                                return Err(furthest_error_idx)
+                            }?;
+                            Ok((result, consumed))
+                        } else
+                    )*
+                    {
+                        unreachable!()
+                    }
+                    .map_or_else(|idx: usize| Err(idx+1), |(instr, consumed)| Ok((instr, consumed+1)))
                 }else {
                     Err(0)
                 }
@@ -415,7 +416,7 @@ map_mnemonics! {
         > => (*tar1,((),(*tar2,*next)))
     }
     (EchoLong(target)) = {
-        target <= ReferenceParser<10,false> => target
+        target = ReferenceParser<10,false>
     }
     "inc"(Alu(AluVariant::Inc, target)) =
     "dec"(Alu(AluVariant::Dec, target)) =
