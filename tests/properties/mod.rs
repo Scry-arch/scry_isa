@@ -12,8 +12,8 @@ fn print_then_parse(instr: Instruction) -> bool
 		println!("Failed to print instruction.\n Instruction: [{:?}]\n Error: {}", instr, err);
 		false
 	} else {
-		match Instruction::parse(buffer.split(" ")) {
-			Ok((instr2, _)) => {
+		match Instruction::parse(buffer.split(" "), &|_,_| unreachable!()) {
+			Ok((instr2,..)) => {
 				if instr != instr2 {
 					println!("{:?} => {:?}", instr, instr2);
 					false
@@ -29,7 +29,7 @@ fn print_then_parse(instr: Instruction) -> bool
 	}
 }
 
-/// Tests that the number of tokens consumed by parsing is exactly equal
+/// Tests that the number of tokens and bytes consumed by parsing is exactly equal
 /// to the tokens in the instruction.
 /// I.e. ensures that tokens after the instruction are ignored.
 #[quickcheck]
@@ -41,9 +41,10 @@ fn consumes_only_instruction_tokens(instr: Instruction, extra: String) -> bool
 	let instr_tokens: Vec<_> = buffer.split(" ").collect();
 	let extra_tokens: Vec<_> = extra.split(" ").collect();
 	
-	let (_, consumed) = Instruction::parse(instr_tokens.iter().cloned().chain(extra_tokens.into_iter())).unwrap();
+	let (_, consumed, bytes) = Instruction::parse(instr_tokens.iter().cloned().chain(extra_tokens.into_iter()), &|_,_| unreachable!()).unwrap();
 	
-	consumed == instr_tokens.len()
+	(consumed == (instr_tokens.len() - 1)) &&
+		(bytes == instr_tokens.last().unwrap().len())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -122,7 +123,7 @@ fn different_commas(instr: Instruction, t1: CommaType, t_rest: Vec<CommaType>) -
 				}
 			}
 		}
-		TestResult::from_bool(Instruction::parse(new_buffer.split(" ").into_iter()).is_ok())
+		TestResult::from_bool(Instruction::parse(new_buffer.split(" ").into_iter(), &|_,_| unreachable!()).is_ok())
 	} else {
 		TestResult::discard()
 	}
@@ -150,7 +151,7 @@ fn error_index_only_in_instruction(instr: Instruction, inject: char, mut inject_
 	
 	buffer.push_str(postfix.as_str());
 	
-	Instruction::parse(buffer.split(" ").into_iter()).map_or_else(
+	Instruction::parse(buffer.split(" ").into_iter(), &|_,_| unreachable!()).map_or_else(
 		|idx| TestResult::from_bool(idx < instr_token_count),
 		|_| TestResult::discard())
 }

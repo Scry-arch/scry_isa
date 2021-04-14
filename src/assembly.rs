@@ -325,7 +325,8 @@ macro_rules! map_mnemonics_impl {
             const ALONE_RIGHT: bool = true;
             const ALONE_LEFT: bool = true;
             
-            fn parse<'a>(mut tokens: impl Iterator<Item=&'a str>  + Clone) -> Result<(Self::Internal, usize), usize>
+            fn parse<'a, F>(mut tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		        where F: Fn(Option<&str>, &str) -> isize
             {
                 use Instruction::*;
                 lazy_static!{
@@ -343,27 +344,27 @@ macro_rules! map_mnemonics_impl {
                     $(
                         if *parser_idx == ($idx) {
                             let mut furthest_error_idx = 0;
-                            let (result, consumed) =
+                            let (result, consumed, bytes) =
                             $(
-                                if let Ok(($parse_result, consumed)) = <$parser_type>::parse(tokens.clone())
+                                if let Ok(($parse_result, consumed, bytes)) = <$parser_type>::parse(tokens.clone(), f)
                                     .or_else(|error_idx| {
                                         furthest_error_idx = std::cmp::max(furthest_error_idx, error_idx);
                                         Err(0)
                                     })
                                 {
-                                    Result::<(Instruction, usize), usize>::Ok(($($instr)* , consumed))
+                                    Result::<(Instruction, usize, usize), usize>::Ok(($($instr)* , consumed, bytes))
                                 } else
                             )+
                             {
                                 return Err(furthest_error_idx)
                             }?;
-                            Ok((result, consumed))
+                            Ok((result, consumed, bytes))
                         } else
                     )*
                     {
                         unreachable!()
                     }
-                    .map_or_else(|idx: usize| Err(idx+1), |(instr, consumed)| Ok((instr, consumed+1)))
+                    .map_or_else(|idx: usize| Err(idx+1), |(instr, consumed, bytes)| Ok((instr, consumed+1, bytes)))
                 }else {
                     Err(0)
                 }
@@ -393,37 +394,37 @@ macro_rules! map_mnemonics_impl {
 map_mnemonics! {
     "jmp"(Jump(imm, loc)) = {
         (imm, loc) <= Or<
-            CommaBetween<ReferenceParser<7,true>, ReferenceParser<6,false>>,
-            ReferenceParser<13,false>,
+            CommaBetween<Offset<7,true>, Offset<6,false>>,
+            Offset<13,false>,
             _
         >
         => (*imm, *loc)
     }
     "ret"(Call(CallVariant::Ret, loc)) = {
-        loc = ReferenceParser<6,false>
+        loc = Offset<6,false>
     }
     "echo"
     (Echo(tar1,tar2,next)) = {
         (tar1,((),(tar2,next))) <= Then<
-            ReferenceParser<5,false>,
+            ReferenceParser<5>,
             Then<
                 Comma,
                 Then<
-                    ReferenceParser<5,false>,
+                    ReferenceParser<5>,
                     BoolFlag<Then<Comma, Alone<Arrow>>>
                 >,
            >
         > => (*tar1,((),(*tar2,*next)))
     }
     (EchoLong(target)) = {
-        target = ReferenceParser<10,false>
+        target = ReferenceParser<10>
     }
     "inc"(Alu(AluVariant::Inc, target)) =
     "dec"(Alu(AluVariant::Dec, target)) =
     "rol"(Alu(AluVariant::RotateLeft, target)) =
     "ror"(Alu(AluVariant::RotateRight, target)) =
     {
-        target = ReferenceParser<5,false>
+        target = ReferenceParser<5>
     }
     "add"
     (Alu(AluVariant::Add, target)) =
@@ -436,17 +437,17 @@ map_mnemonics! {
     (Alu2(Alu2Variant::ShiftLeft, output, target)) =
     "shr"
     (Alu(AluVariant::ShiftRight, target)) ={
-        target = ReferenceParser<5,false>
+        target = ReferenceParser<5>
     }
     (Alu2(Alu2Variant::ShiftRight, output, target)) ={
-        (output, target) <= Then<
+        (output, target) <= CommaBetween<
             Flatten<Then<
                 Flag<Ident<High>, Ident<Low>>,
                 Maybe<
                     Then<Flag<Arrow, Plus>, Flag<Ident<High>, Ident<Low>>>
 		        >,
             >, _>,
-            ReferenceParser<5,false>
+            ReferenceParser<5>
         > => (*output, *target)
     }
     
