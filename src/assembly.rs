@@ -319,14 +319,14 @@ macro_rules! map_mnemonics_impl {
             }
         }
         
-        impl Parser for Instruction
+        impl<'a> Parser<'a> for Instruction
         {
             type Internal = Instruction;
             const ALONE_RIGHT: bool = true;
             const ALONE_LEFT: bool = true;
             
-            fn parse<'a, F>(mut tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		        where F: Fn(Option<&str>, &str) -> isize
+            fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		        where F: Fn(Option<&str>, &str) -> i32
             {
                 use Instruction::*;
                 lazy_static!{
@@ -344,7 +344,6 @@ macro_rules! map_mnemonics_impl {
                     $(
                         if *parser_idx == ($idx) {
                             let mut furthest_error_idx = 0;
-                            let (result, consumed, bytes) =
                             $(
                                 if let Ok(($parse_result, consumed, bytes)) = <$parser_type>::parse(tokens.clone(), f)
                                     .or_else(|error_idx| {
@@ -356,9 +355,8 @@ macro_rules! map_mnemonics_impl {
                                 } else
                             )+
                             {
-                                return Err(furthest_error_idx)
-                            }?;
-                            Ok((result, consumed, bytes))
+                                Err(furthest_error_idx)
+                            }
                         } else
                     )*
                     {
@@ -394,7 +392,7 @@ macro_rules! map_mnemonics_impl {
 map_mnemonics! {
     "jmp"(Jump(imm, loc)) = {
         (imm, loc) <= Or<
-            CommaBetween<Offset<7,true>, Offset<6,false>>,
+            JumpOffsets,
             Offset<13,false>,
             _
         >
@@ -442,9 +440,9 @@ map_mnemonics! {
     (Alu2(Alu2Variant::ShiftRight, output, target)) ={
         (output, target) <= CommaBetween<
             Flatten<Then<
-                Flag<Ident<High>, Ident<Low>>,
+                Flag<Keyword<High>, Keyword<Low>>,
                 Maybe<
-                    Then<Flag<Arrow, Plus>, Flag<Ident<High>, Ident<Low>>>
+                    Then<Flag<Arrow, Plus>, Flag<Keyword<High>, Keyword<Low>>>
 		        >,
             >, _>,
             ReferenceParser<5>

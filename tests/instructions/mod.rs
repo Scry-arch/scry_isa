@@ -4,10 +4,10 @@ use scry_isa::{Parser, Instruction};
 ///
 /// If parsing fails, returns the index of the token that caused the failure.
 /// 0-indexed. Tokens are whitespace-delimited
-fn parse_assembly(asm: &str) -> Result<Instruction, usize>
+fn parse_assembly(asm: &str, f: & impl Fn(Option<&str>, &str) -> i32) -> Result<Instruction, usize>
 {
 	let tokens: Vec<_> = asm.split_ascii_whitespace().collect();
-	Instruction::parse(tokens.iter().cloned(), &|_,_| unreachable!()).map(|(instr,..)| instr)
+	Instruction::parse(tokens.iter().cloned(), f).map(|(instr,..)| instr)
 }
 
 /// Tests the parsing of specific instruction.
@@ -25,14 +25,36 @@ fn parse_assembly(asm: &str) -> Result<Instruction, usize>
 ///
 macro_rules! test_assembly {
 	(
-		$($asm:literal $(=> $asm2:literal)?)*
+		$(
+			$(($addr0:literal $($id1:ident: $addr1:literal)+))?
+			$asm:literal  $(=> $asm2:literal)?
+		)*
 	) => {
 		use super::*;
 		
+		#[allow(unreachable_code)]
+		#[allow(unused_variables)]
 		#[test]
 		fn assembly() {
 			$(
-				let instr = parse_assembly($asm).unwrap_or_else(|idx|
+				$(
+					let mut addresses = std::collections::HashMap::new();
+					$(
+						addresses.insert(stringify!($id1), $addr1);
+					)+
+				)?
+				let instr = parse_assembly($asm, &|start, end|{
+					$(	return
+						(	addresses[end] -
+							if let Some(start) = start {
+								addresses[start]
+							} else {
+								$addr0
+							}
+						) / 2;
+					)?
+					panic!("No symbols given.");
+				}).unwrap_or_else(|idx|
 					panic!("Failed to parse '{}' at token '{}'", $asm, idx)
 				);
 				let mut buff = String::new();

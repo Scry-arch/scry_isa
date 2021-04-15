@@ -1,6 +1,7 @@
 use scry_isa::{Instruction, Parser};
 use quickcheck::{TestResult, Gen, Arbitrary};
 use rand::seq::SliceRandom;
+use std::cell::Cell;
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
@@ -150,8 +151,18 @@ fn error_index_only_in_instruction(instr: Instruction, inject: char, mut inject_
 	buffer.insert(inject_idx, inject);
 	
 	buffer.push_str(postfix.as_str());
-	
-	Instruction::parse(buffer.split(" ").into_iter(), &|_,_| unreachable!()).map_or_else(
-		|idx| TestResult::from_bool(idx < instr_token_count),
+	let injected_symbol = Cell::new(false);
+	Instruction::parse(buffer.split(" ").into_iter(), &|start,end| {
+		if let Some(start) = start {
+			injected_symbol.set(start.contains(inject))
+		}
+		injected_symbol.set(injected_symbol.get() || end.contains(inject));
+		0
+	}).map_or_else(
+		|idx| if injected_symbol.get() {
+			TestResult::discard()
+		} else {
+			TestResult::from_bool(idx < instr_token_count)
+		},
 		|_| TestResult::discard())
 }

@@ -7,7 +7,7 @@ use std::fmt::Write;
 use std::cmp::max;
 use duplicate::duplicate_inline;
 
-pub trait Parser
+pub trait Parser<'a>
 {
 	type Internal;
 	
@@ -29,8 +29,8 @@ pub trait Parser
 	/// If x has a lower address than y, the result should be positive.
 	/// If x has a higher adderss than y, the result should be negative.
 	/// If (None, y), the first symbol is the one for the current instruction being parsed.
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize;
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32;
 	
 	fn print_with_whitespace(internal: &Self::Internal, prev_alone: bool, out: &mut impl std::fmt::Write) -> std::fmt::Result
 	{
@@ -43,13 +43,13 @@ pub trait Parser
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result;
 }
 
-impl Parser for u16 {
+impl<'a> Parser<'a> for u16 {
 	type Internal = u16;
 	const ALONE_RIGHT: bool = true;
 	const ALONE_LEFT: bool = true;
 	
-	fn parse<'a, F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		let value_string = tokens.next()
 			// Extract digits from beginning
@@ -65,13 +65,13 @@ impl Parser for u16 {
 	}
 }
 
-impl Parser for i32 {
+impl<'a> Parser<'a> for i32 {
 	type Internal = i32;
 	const ALONE_RIGHT: bool = true;
 	const ALONE_LEFT: bool = true;
 	
-	fn parse<'a, F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		
 		let value_string = tokens.next()
@@ -88,29 +88,58 @@ impl Parser for i32 {
 	}
 }
 
+pub struct Symbol();
+impl<'a> Parser<'a> for Symbol {
+	type Internal = &'a str;
+	const ALONE_RIGHT: bool = true;
+	const ALONE_LEFT: bool = true;
+	
+	fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
+	{
+		tokens.next()
+			.filter(|t| !t.starts_with(char::is_numeric))
+			.map(|t| t.splitn(2, |c:char|
+				!(c.is_ascii_alphanumeric() ||
+					c == '-' ||
+					c == '_' ||
+					c == '.')
+			).next().unwrap()
+			).filter(|t| !t.is_empty()).map(|sym| (sym, 0, sym.len())).ok_or(0usize)
+	}
+	
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result {
+		out.write_str(internal)
+	}
+}
+
 pub struct Offset<const SIZE: u32, const SIGNED: bool>();
-impl<const SIZE: u32, const SIGNED: bool> Parser for Offset<SIZE, SIGNED>
+impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED>
 {
 	type Internal = Bits<SIZE, SIGNED>;
 	const ALONE_RIGHT: bool = true;
 	const ALONE_LEFT: bool = true;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str) -> i32
 	{
 		if SIGNED {
-			i32::parse(tokens, f).and_then(|(value, consumed, bytes)|
-				Bits::new(value).map_or_else(
-					||Err(0),
-					|b|Ok((b, consumed,bytes)))
-			)
+			i32::parse(tokens.clone(), f)
 		} else {
-			u16::parse(tokens, f).and_then(|(value, consumed, bytes)|
-				Bits::new(value as i32).map_or_else(
-					||Err(0),
-					|b|Ok((b, consumed,bytes)))
+			u16::parse(tokens.clone(), f).map(|(value, consumed, bytes)|
+				(value as i32, consumed, bytes)
 			)
-		}
+		}.or_else(|_|
+			Symbol::parse(tokens, f).map(|(symbol, consumed, bytes)|
+				(f(None, symbol), consumed, bytes)
+			)
+		).and_then(
+			|(value, consumed, bytes)|
+				Bits::<SIZE, SIGNED>::new(value).map_or_else(
+					|| Err(0usize),
+					|b| Ok((b, consumed, bytes))
+				)
+		)
 	}
 	
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
@@ -120,14 +149,14 @@ impl<const SIZE: u32, const SIGNED: bool> Parser for Offset<SIZE, SIGNED>
 }
 
 pub struct ReferenceParser<const SIZE: u32>();
-impl<const SIZE: u32> Parser for ReferenceParser<SIZE>
+impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 {
 	type Internal = Bits<SIZE, false>;
 	const ALONE_RIGHT: bool = true;
 	const ALONE_LEFT: bool = true;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		Then::<Arrow, u16>::parse(tokens, f).and_then(|(((),value), consumed, bytes)|
 			Bits::new(value as i32).map_or_else(
@@ -142,16 +171,16 @@ impl<const SIZE: u32> Parser for ReferenceParser<SIZE>
 	}
 }
 
-pub struct CommaBetween<P1: Parser, P2: Parser>(PhantomData<(P1, P2)>);
+pub struct CommaBetween<'a,P1: 'a + Parser<'a>, P2: 'a + Parser<'a>>(PhantomData<&'a (P1, P2)>);
 
-impl<P1:Parser, P2: Parser> Parser for CommaBetween<P1, P2>
+impl<'a,P1:'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for CommaBetween<'a,P1, P2>
 {
 	type Internal = (P1::Internal, P2::Internal);
 	const ALONE_RIGHT: bool = P2::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P1::ALONE_LEFT;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		Then::<P1, Then<Comma, P2>>::parse(tokens, f).map(|((left, ((), right)), tokens, bytes)| ((left, right), tokens, bytes))
 	}
@@ -164,22 +193,26 @@ impl<P1:Parser, P2: Parser> Parser for CommaBetween<P1, P2>
 	}
 }
 
-pub struct Then<P1: Parser, P2: Parser>(PhantomData<(P1,P2)>);
-impl<P1: Parser, P2: Parser> Parser for Then<P1,P2>
+pub struct Then<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>>(PhantomData<&'a (P1,P2)>);
+impl<'a,P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a,P1,P2>
 {
 	type Internal = (P1::Internal, P2::Internal);
 	const ALONE_RIGHT: bool = P2::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P1::ALONE_LEFT;
 	
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		match P1::parse(tokens.clone(), f) {
 			Ok((result1, consumed1, bytes1)) => {
 				let mut tokens = tokens.skip(consumed1);
+				let mut bytes1_consume_token = false;
 				let first_next_token =  tokens.next().map(|t| t.split_at(bytes1).1)
-					.filter(|t| !t.is_empty());
+					.filter(|t| {
+						bytes1_consume_token = t.is_empty();
+						!bytes1_consume_token
+					});
 				
 				match P2::parse(first_next_token.into_iter().chain(tokens), f) {
 					Ok((result2, 0, 0)) => Ok(((result1, result2), consumed1, bytes1)),
@@ -188,7 +221,7 @@ impl<P1: Parser, P2: Parser> Parser for Then<P1,P2>
 						consumed1 + consumed2 + ((first_next_token.is_none()) as usize),
 						bytes2 + (bytes1 * ((first_next_token.is_some() && consumed2 == 0) as usize))
 					)),
-					Err(idx) => Err(consumed1 + idx)
+					Err(idx) => Err(consumed1 + idx + (bytes1_consume_token as usize))
 				}
 			}
 			Err(idx) => Err(idx)
@@ -203,12 +236,12 @@ impl<P1: Parser, P2: Parser> Parser for Then<P1,P2>
 	}
 }
 
-pub struct Or<P1: Parser, P2: Parser, T>(PhantomData<(P1,P2,T)>)
+pub struct Or<'a,P1: 'a + Parser<'a>, P2: 'a + Parser<'a>, T>(PhantomData<&'a (P1,P2,T)>)
 	where
 		T: Copy + TryFrom<P1::Internal> + TryFrom<P2::Internal>,
 		P1::Internal: TryFrom<T>,
 		P2::Internal: TryFrom<T>,;
-impl<P1: Parser, P2: Parser, T> Parser for Or<P1,P2,T>
+impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>, T> Parser<'a> for Or<'a,P1,P2,T>
 	where
 		T: Copy + TryFrom<P1::Internal> + TryFrom<P2::Internal>,
 		P1::Internal: TryFrom<T>,
@@ -218,8 +251,8 @@ impl<P1: Parser, P2: Parser, T> Parser for Or<P1,P2,T>
 	const ALONE_RIGHT: bool = P1::ALONE_RIGHT || P2::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P1::ALONE_LEFT || P2::ALONE_LEFT;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		let err1 = match P1::parse(tokens.clone(), f) {
 			Ok((result, consumed, bytes)) => match result.try_into() {
@@ -251,28 +284,28 @@ impl<P1: Parser, P2: Parser, T> Parser for Or<P1,P2,T>
 	}
 }
 
-pub trait HasIdent
+pub trait HasWord
 {
-	const IDENT: &'static str;
+	const WORD: &'static str;
 }
 
-pub struct Ident<I: HasIdent>(PhantomData<I>);
-impl<I: HasIdent> Parser for Ident<I>
+pub struct Keyword<I: HasWord>(PhantomData<I>);
+impl<'a, I: HasWord> Parser<'a> for Keyword<I>
 {
 	type Internal = ();
 	const ALONE_RIGHT: bool = true;
 	const ALONE_LEFT: bool = true;
 	
-	fn parse<'a, F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
-		tokens.next().filter(|t| t.starts_with(I::IDENT))
-			.map(|_| ((), 0, I::IDENT.len()))
+		tokens.next().filter(|t| t.starts_with(I::WORD))
+			.map(|_| ((), 0, I::WORD.len()))
 			.ok_or(0)
 	}
 	
 	fn print(_: &Self::Internal, out: &mut impl Write) -> std::fmt::Result {
-		out.write_str(I::IDENT)
+		out.write_str(I::WORD)
 	}
 }
 
@@ -283,9 +316,9 @@ duplicate_inline! {
 		[Low]	["Low"];
 	]
 	pub struct name();
-	impl HasIdent for name
+	impl HasWord for name
 	{
-		const IDENT:&'static str = text;
+		const WORD:&'static str = text;
 	}
 }
 
@@ -297,14 +330,14 @@ duplicate_inline!{
 		[Plus]	["+"]		[false];
 	]
 	pub struct name();
-	impl Parser for name
+	impl<'a> Parser<'a> for name
 	{
 		type Internal = ();
 		const ALONE_RIGHT: bool = alone_right;
 		const ALONE_LEFT: bool = false;
 		
-		fn parse<'a, F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
-			where F: Fn(Option<&str>, &str) -> isize
+		fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, _: &F) -> Result<(Self::Internal, usize, usize), usize>
+			where F: Fn(Option<&str>, &str)  -> i32
 		{
 			tokens.next().filter(|t| t.starts_with(text))
 				.map(|_| ((), 0, text.len()))
@@ -317,15 +350,15 @@ duplicate_inline!{
 	}
 }
 
-pub struct Maybe<P:Parser>(PhantomData<P>);
-impl<P:Parser> Parser for Maybe<P>
+pub struct Maybe<'a, P: 'a + Parser<'a>>(PhantomData<&'a P>);
+impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a,P>
 {
 	type Internal = Option<P::Internal>;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		match P::parse(tokens, f) {
 			Ok((result, consumed, bytes)) => Ok((Some(result), consumed, bytes)),
@@ -342,17 +375,17 @@ impl<P:Parser> Parser for Maybe<P>
 	}
 }
 
-pub struct BoolFlag<P:Parser>(PhantomData<P>)
+pub struct BoolFlag<'a, P: 'a + Parser<'a>>(PhantomData<&'a P>)
 	where P::Internal: Default;
-impl<P:Parser> Parser for BoolFlag<P>
+impl<'a,P: 'a + Parser<'a>> Parser<'a> for BoolFlag<'a,P>
 	where P::Internal: Default
 {
 	type Internal = bool;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		match P::parse(tokens, f) {
 			Ok((_, consumed, bytes)) => Ok((true, consumed, bytes)),
@@ -369,17 +402,17 @@ impl<P:Parser> Parser for BoolFlag<P>
 	}
 }
 
-pub struct Flag<P1:Parser, P2:Parser>(PhantomData<(P1,P2)>)
+pub struct Flag<'a,P1: 'a + Parser<'a>, P2: 'a + Parser<'a>>(PhantomData<&'a (P1,P2)>)
 	where P1::Internal: Default, P2::Internal: Default;
-impl<P1:Parser, P2:Parser> Parser for Flag<P1, P2>
+impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Flag<'a, P1, P2>
 	where P1::Internal: Default, P2::Internal: Default
 {
 	type Internal = bool;
 	const ALONE_RIGHT: bool = P1::ALONE_RIGHT || P2::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P1::ALONE_LEFT || P2::ALONE_LEFT;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		match P1::parse(tokens.clone(), f) {
 			Ok((_, consumed, bytes)) => Ok((true, consumed, bytes)),
@@ -431,21 +464,21 @@ impl From<&Alu2OutputVariant> for (bool, Option<(bool, bool)>)
 	}
 }
 
-pub struct Flatten<P: Parser, T>(PhantomData<(P,T)>)
+pub struct Flatten<'a,P: 'a + Parser<'a>, T>(PhantomData<&'a (P,T)>)
 	where
 		T: TryFrom<P::Internal>,
-		P::Internal: for<'a> From<&'a T>;
-impl<P: Parser, T> Parser for Flatten<P,T>
+		P::Internal: for<'b> From<&'b T>;
+impl<'a, P: 'a + Parser<'a>, T> Parser<'a> for Flatten<'a,P,T>
 	where
 		T: TryFrom<P::Internal>,
-		P::Internal: for<'a> From<&'a T>
+		P::Internal: for<'b> From<&'b T>
 {
 	type Internal = T;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		let (result, consumed, bytes) = P::parse(tokens,f)?;
 		if let Ok(result) = result.try_into() {
@@ -460,15 +493,15 @@ impl<P: Parser, T> Parser for Flatten<P,T>
 	}
 }
 
-pub struct Alone<P:Parser>(PhantomData<P>);
-impl<P: Parser> Parser for Alone<P>
+pub struct Alone<'a,P: 'a + Parser<'a>>(PhantomData<&'a P>);
+impl<'a, P: 'a + Parser<'a>> Parser<'a> for Alone<'a,P>
 {
 	type Internal = P::Internal;
 	const ALONE_RIGHT: bool = true;
 	const ALONE_LEFT: bool = true;
 	
-	fn parse<'a, F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		where F: Fn(Option<&str>, &str) -> isize
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
+		where F: Fn(Option<&str>, &str)  -> i32
 	{
 		P::parse(tokens,f)
 	}
@@ -477,3 +510,28 @@ impl<P: Parser> Parser for Alone<P>
 		P::print(internal, out)
 	}
 }
+
+pub struct JumpOffsets<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for JumpOffsets<'a>
+{
+	type Internal = (Bits<7, true>, Bits<6, false>);
+	const ALONE_RIGHT: bool = true;
+	const ALONE_LEFT: bool = true;
+	
+	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize> where F: Fn(Option<&str>, &str) -> i32 {
+		let starts_with_symbol = Symbol::parse(tokens.clone(), &|_,_| 0).is_ok();
+		let ((off1, off2), consumed, bytes) = CommaBetween::<Offset<8,true>, Offset<6,false>>::parse(tokens, f)?;
+		if starts_with_symbol && off1.value() > 0 {
+			// Offset 1 is relative to off2
+			Bits::new(off1.value() - off2.value()).map_or(Err(0), |v| Ok(((v, off2), consumed, bytes)))
+		} else {
+			// Ensure right size for offset
+			Bits::new(off1.value()).map_or(Err(0), |v| Ok(((v, off2), consumed, bytes)))
+		}
+	}
+	
+	fn print(&(off1, off2): &Self::Internal, out: &mut impl Write) -> std::fmt::Result {
+		CommaBetween::<Offset<7,true>, Offset<6,false>>::print(&(off1, off2), out)
+	}
+}
+
