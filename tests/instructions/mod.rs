@@ -51,7 +51,7 @@ macro_rules! test_assembly {
 							} else {
 								$addr0
 							}
-						) / 2;
+						);
 					)?
 					panic!("No symbols given.");
 				}).unwrap_or_else(|idx|

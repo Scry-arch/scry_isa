@@ -131,7 +131,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 			)
 		}.or_else(|_|
 			Symbol::parse(tokens, f).map(|(symbol, consumed, bytes)|
-				(f(None, symbol), consumed, bytes)
+				(f(None, symbol)/2, consumed, bytes)
 			)
 		).and_then(
 			|(value, consumed, bytes)|
@@ -158,11 +158,49 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 	fn parse<F>(tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
 		where F: Fn(Option<&str>, &str)  -> i32
 	{
-		Then::<Arrow, u16>::parse(tokens, f).and_then(|(((),value), consumed, bytes)|
+		Then::<Arrow, u16>::parse(tokens.clone(), f).and_then(|(((),value), consumed, bytes)|
 			Bits::new(value as i32).map_or_else(
 				||Err(0),
 				|b|Ok((b, consumed,bytes)))
-		)
+		).or_else(|idx| {
+			let mut result = Then::<Arrow, Symbol>::parse(tokens.clone(), f)
+				 .and_then(|(((), sym1), consumed, bytes)| {
+					 let off1 = (f(None, sym1) / 2) - 1;
+					 if off1 < 0 {
+						 Err(consumed)
+					 } else {
+						 Ok(((sym1, off1), consumed, bytes))
+					 }
+				 });
+			let mut next_branch_to = true;
+			let mut next_result = result;
+			while let Ok(((sym1, offset), consumed, bytes)) = next_result {
+				result = Ok(((sym1, offset), consumed, bytes));
+				let mut tokens = tokens.clone().skip(consumed);
+				let first_next = tokens.next().map(|t| t.split_at(bytes).1).filter(|t| !t.is_empty());
+				
+				next_result = Then::<Arrow, Symbol>::parse(first_next.into_iter().chain(tokens), f)
+					.and_then(|(((), sym), consumed2, bytes2)| {
+						let next_consumed = consumed + consumed2 + first_next.is_none() as usize;
+						let next_bytes = bytes2 + (bytes * first_next.is_some() as usize);
+						
+						if next_branch_to {
+							Ok(((sym, offset), next_consumed, next_bytes))
+						} else {
+							let next_offset = f(Some(sym1), sym) / 2;
+							if next_offset < 0 {
+								Err(consumed)
+							} else {
+								Ok(((sym, offset+ next_offset), next_consumed, next_bytes))
+							}
+						}
+					});
+				next_branch_to = !next_branch_to;
+			}
+			result.and_then(|((_, offset), consumed, bytes)|{
+				Bits::new(offset).ok_or(max(consumed, idx)).map(|b| (b, consumed, bytes))
+			})
+		})
 	}
 	
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
@@ -325,7 +363,7 @@ duplicate_inline! {
 duplicate_inline!{
 	[
 		name	text		alone_right;
-		[Arrow]	["->"]		[false];
+		[Arrow]	["=>"]		[false];
 		[Comma]	[","]		[true];
 		[Plus]	["+"]		[false];
 	]
