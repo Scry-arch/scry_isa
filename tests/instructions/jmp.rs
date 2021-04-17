@@ -9,7 +9,7 @@ test_assembly! {
 	"jmp 3413" => "jmp 53, 21"
 	"jmp 4159" => "jmp -64, 63"
 	"jmp 8191" => "jmp -1, 63"
-	
+
 	(10 start:4 end:18)
 	"jmp start, end"  => "jmp -3, 4"
 	(14 end:18)

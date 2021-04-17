@@ -1,9 +1,8 @@
 //! This crate defines the Scry Instruction Set Architecture.
 
-mod matchers;
-mod instructions;
 mod assembly;
+mod instructions;
+mod matchers;
 
-pub use matchers::*;
 pub use instructions::*;
-
+pub use matchers::*;

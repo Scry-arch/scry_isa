@@ -1,6 +1,6 @@
-use scry_isa::{Instruction, Parser};
-use quickcheck::{TestResult, Gen, Arbitrary};
+use quickcheck::{Arbitrary, Gen, TestResult};
 use rand::seq::SliceRandom;
+use scry_isa::{Instruction, Parser};
 use std::cell::Cell;
 
 /// Tests that if we first print an instruction and then parse the printed text
@@ -9,52 +9,76 @@ use std::cell::Cell;
 fn print_then_parse(instr: Instruction) -> bool
 {
 	let mut buffer = String::new();
-	if let Err(err) = Instruction::print(&instr,&mut buffer) {
-		println!("Failed to print instruction.\n Instruction: [{:?}]\n Error: {}", instr, err);
+	if let Err(err) = Instruction::print(&instr, &mut buffer)
+	{
+		println!(
+			"Failed to print instruction.\n Instruction: [{:?}]\n Error: {}",
+			instr, err
+		);
 		false
-	} else {
-		match Instruction::parse(buffer.split(" "), &|_,_| unreachable!()) {
-			Ok((instr2,..)) => {
-				if instr != instr2 {
+	}
+	else
+	{
+		match Instruction::parse(buffer.split(" "), &|_, _| unreachable!())
+		{
+			Ok((instr2, ..)) =>
+			{
+				if instr != instr2
+				{
 					println!("{:?} => {:?}", instr, instr2);
 					false
-				} else {
+				}
+				else
+				{
 					true
 				}
 			},
-			Err(idx) => {
-				println!("Failed to parse instruction.\nText: '{}'\nError Index: {}", buffer, idx);
+			Err(idx) =>
+			{
+				println!(
+					"Failed to parse instruction.\nText: '{}'\nError Index: {}",
+					buffer, idx
+				);
 				false
-			}
+			},
 		}
 	}
 }
 
-/// Tests that the number of tokens and bytes consumed by parsing is exactly equal
-/// to the tokens in the instruction.
+/// Tests that the number of tokens and bytes consumed by parsing is exactly
+/// equal to the tokens in the instruction.
 /// I.e. ensures that tokens after the instruction are ignored.
 #[quickcheck]
 fn consumes_only_instruction_tokens(instr: Instruction, extra: String) -> bool
 {
 	let mut buffer = String::new();
-	Instruction::print(&instr,&mut buffer).unwrap();
-	
+	Instruction::print(&instr, &mut buffer).unwrap();
+
 	let instr_tokens: Vec<_> = buffer.split(" ").collect();
 	let extra_tokens: Vec<_> = extra.split(" ").collect();
-	
-	let (_, consumed, bytes) = Instruction::parse(instr_tokens.iter().cloned().chain(extra_tokens.into_iter()), &|_,_| unreachable!()).unwrap();
-	
-	(consumed == (instr_tokens.len() - 1)) &&
-		(bytes == instr_tokens.last().unwrap().len())
+
+	let (_, consumed, bytes) = Instruction::parse(
+		instr_tokens.iter().cloned().chain(extra_tokens.into_iter()),
+		&|_, _| unreachable!(),
+	)
+	.unwrap();
+
+	(consumed == (instr_tokens.len() - 1)) && (bytes == instr_tokens.last().unwrap().len())
 }
 
 #[derive(Clone, Copy, Debug)]
-enum CommaType {
-	AtEnd, AtStart, InMiddle, Alone
+enum CommaType
+{
+	AtEnd,
+	AtStart,
+	InMiddle,
+	Alone,
 }
 
-impl Arbitrary for CommaType {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self {
+impl Arbitrary for CommaType
+{
+	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	{
 		use CommaType::*;
 		*[AtEnd, AtStart, InMiddle, Alone].choose(g).unwrap()
 	}
@@ -67,24 +91,33 @@ impl Arbitrary for CommaType {
 /// 1. Comma as the start of a token with other text.
 /// 1. Comma in the middle of a token, with text on both sides.
 #[quickcheck]
-fn different_commas(instr: Instruction, t1: CommaType, t_rest: Vec<CommaType>) -> quickcheck::TestResult
+fn different_commas(
+	instr: Instruction,
+	t1: CommaType,
+	t_rest: Vec<CommaType>,
+) -> quickcheck::TestResult
 {
 	let mut buffer = String::new();
-	Instruction::print(&instr,&mut buffer).unwrap();
-	
-	// We make an infinite iterator producing comma types for use in the following loop.
-	// We do this to ensure some variety to the types each match block gets.
+	Instruction::print(&instr, &mut buffer).unwrap();
+
+	// We make an infinite iterator producing comma types for use in the following
+	// loop. We do this to ensure some variety to the types each match block gets.
 	let mut comma_types = Some(t1).into_iter().chain(t_rest.into_iter()).cycle();
-	
-	if buffer.contains(",") {
+
+	if buffer.contains(",")
+	{
 		let mut new_buffer = String::new();
-		
-		for t in buffer.split(",") {
+
+		for t in buffer.split(",")
+		{
 			use CommaType::*;
-			if new_buffer.ends_with(" ") {
+			if new_buffer.ends_with(" ")
+			{
 				// Is Alone or AtStart(of next token)
-				match comma_types.next().unwrap() {
-					AtEnd | InMiddle => {
+				match comma_types.next().unwrap()
+				{
+					AtEnd | InMiddle =>
+					{
 						// Remove the space and replace with comma
 						new_buffer.pop().unwrap();
 						new_buffer.push(',');
@@ -92,52 +125,74 @@ fn different_commas(instr: Instruction, t1: CommaType, t_rest: Vec<CommaType>) -
 					_ => (),
 				}
 				new_buffer.push_str(t);
-			} else {
-				if t.starts_with(" ") {
+			}
+			else
+			{
+				if t.starts_with(" ")
+				{
 					// Comma is AtEnd (of prev token) or Alone
 					new_buffer.push(',');
-					match comma_types.next().unwrap() {
-						AtStart | InMiddle => {
+					match comma_types.next().unwrap()
+					{
+						AtStart | InMiddle =>
+						{
 							// Remove space
 							new_buffer.push_str(&t[1..]);
 						},
 						_ => new_buffer.push_str(t),
 					}
-				} else if !new_buffer.is_empty(){
+				}
+				else if !new_buffer.is_empty()
+				{
 					// Comma is InMiddle
-					match comma_types.next().unwrap() {
-						AtStart => {
+					match comma_types.next().unwrap()
+					{
+						AtStart =>
+						{
 							new_buffer.push_str(" ,");
 						},
-						AtEnd => {
+						AtEnd =>
+						{
 							new_buffer.push_str(", ");
 						},
-						Alone => {
+						Alone =>
+						{
 							new_buffer.push_str(" , ");
 						},
 						InMiddle => new_buffer.push(','),
 					}
 					new_buffer.push_str(t)
-				} else {
+				}
+				else
+				{
 					assert!(new_buffer.is_empty());
 					new_buffer.push_str(t)
 				}
 			}
 		}
-		TestResult::from_bool(Instruction::parse(new_buffer.split(" ").into_iter(), &|_,_| unreachable!()).is_ok())
-	} else {
+		TestResult::from_bool(
+			Instruction::parse(new_buffer.split(" ").into_iter(), &|_, _| unreachable!()).is_ok(),
+		)
+	}
+	else
+	{
 		TestResult::discard()
 	}
 }
 
-/// Tests that if parsing fails because of bad syntax, the reported index is always within
-/// the tokens of the instruction
+/// Tests that if parsing fails because of bad syntax, the reported index is
+/// always within the tokens of the instruction
 #[quickcheck]
-fn error_index_only_in_instruction(instr: Instruction, inject: char, mut inject_idx: usize, postfix: String) -> TestResult
+fn error_index_only_in_instruction(
+	instr: Instruction,
+	inject: char,
+	mut inject_idx: usize,
+	postfix: String,
+) -> TestResult
 {
 	let mut buffer = String::new();
-	Instruction::print(&instr,&mut buffer).unwrap();
-	
+	Instruction::print(&instr, &mut buffer).unwrap();
+
 	// We also count commas because they can be on their own, but the default
 	// print puts at adjacent to teh previous token, which means space counting
 	// doesn't count the comma.
@@ -145,24 +200,33 @@ fn error_index_only_in_instruction(instr: Instruction, inject: char, mut inject_
 
 	// Inject string at next char boundary
 	inject_idx = inject_idx % buffer.as_str().len();
-	while !buffer.as_str().is_char_boundary(inject_idx) {
+	while !buffer.as_str().is_char_boundary(inject_idx)
+	{
 		inject_idx += 1;
 	}
 	buffer.insert(inject_idx, inject);
-	
+
 	buffer.push_str(postfix.as_str());
 	let injected_symbol = Cell::new(false);
-	Instruction::parse(buffer.split(" ").into_iter(), &|start,end| {
-		if let Some(start) = start {
+	Instruction::parse(buffer.split(" ").into_iter(), &|start, end| {
+		if let Some(start) = start
+		{
 			injected_symbol.set(start.contains(inject))
 		}
 		injected_symbol.set(injected_symbol.get() || end.contains(inject));
 		0
-	}).map_or_else(
-		|idx| if injected_symbol.get() {
-			TestResult::discard()
-		} else {
-			TestResult::from_bool(idx < instr_token_count)
+	})
+	.map_or_else(
+		|idx| {
+			if injected_symbol.get()
+			{
+				TestResult::discard()
+			}
+			else
+			{
+				TestResult::from_bool(idx < instr_token_count)
+			}
 		},
-		|_| TestResult::discard())
+		|_| TestResult::discard(),
+	)
 }

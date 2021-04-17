@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use crate::{instructions::*, matchers::*};
 use lazy_static::lazy_static;
-use crate::{matchers::*, instructions::*};
+use std::collections::HashMap;
 
 macro_rules! map_mnemonics {
-    
+
     (
         $mnem1:literal
         $($rest:tt)+
@@ -18,7 +18,7 @@ macro_rules! map_mnemonics {
 }
 
 macro_rules! map_mnemonics_impl {
-    
+
     (
         @extract []
         @wip[]
@@ -35,7 +35,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @extract [$($extracted:tt)*]
         @wip [
@@ -73,7 +73,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @extract [$($extracted:tt)*]
         @wip [
@@ -105,7 +105,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @extract [$($extracted:tt)*]
         @wip [
@@ -137,7 +137,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @extract [$($extracted:tt)*]
         @wip [
@@ -185,7 +185,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @extract [$($extracted:tt)*]
         @wip [
@@ -233,7 +233,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @extract [$($extracted:tt)*]
         @wip[$($wip:tt)*]
@@ -245,7 +245,7 @@ macro_rules! map_mnemonics_impl {
             $($wip)*
         }
     };
-    
+
     (
         @indexify[$($prev:tt)*]
         @next_index [ $idx:expr ]
@@ -278,7 +278,7 @@ macro_rules! map_mnemonics_impl {
             $($rest)*
         }
     };
-    
+
     (
         @indexify[$($prev:tt)*]
         @next_index[$idx:expr]
@@ -288,7 +288,7 @@ macro_rules! map_mnemonics_impl {
             $($prev)*
         }
     };
-    
+
     (
         @finalize
         $( [
@@ -305,7 +305,7 @@ macro_rules! map_mnemonics_impl {
         const INSTRUCTION_MNEMONICS: &'static [&'static str] = &[
             $($mnem),*
         ];
-        
+
         impl Instruction {
             /// Returns the mnemonic for this instruction.
             /// I.e. the mnemonic for load instructions if "ld".
@@ -318,15 +318,19 @@ macro_rules! map_mnemonics_impl {
                 }
             }
         }
-        
+
         impl<'a> Parser<'a> for Instruction
         {
             type Internal = Instruction;
             const ALONE_RIGHT: bool = true;
             const ALONE_LEFT: bool = true;
-            
-            fn parse<F>(mut tokens: impl Iterator<Item=&'a str> + Clone, f: &F) -> Result<(Self::Internal, usize, usize), usize>
-		        where F: Fn(Option<&str>, &str) -> i32
+
+            fn parse<F>(
+                mut tokens: impl Iterator<Item = &'a str> + Clone,
+                f: &F,
+            ) -> Result<(Self::Internal, usize, usize), usize>
+            where
+                F: Fn(Option<&str>, &str) -> i32,
             {
                 use Instruction::*;
                 lazy_static!{
@@ -338,7 +342,7 @@ macro_rules! map_mnemonics_impl {
                         mnem_pars
                     };
                 }
-                
+
                 let mnemonic = tokens.next().ok_or_else(|| 0usize)?;
                 if let Some(parser_idx) = MNEMONIC_PARSERS.get(mnemonic) {
                     $(
@@ -367,14 +371,14 @@ macro_rules! map_mnemonics_impl {
                     Err(0)
                 }
             }
-            
+
             fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
             {
                 use Instruction::*;
-                
+
                 out.write_str(Instruction::mnemonic(internal))?;
                 out.write_str(" ")?;
-                
+
                 match internal {
                     $(
                         $(
@@ -385,68 +389,65 @@ macro_rules! map_mnemonics_impl {
             }
         }
     };
-    
+
     (@throw_out $($tokens:tt)*) =>{}
 }
 
 map_mnemonics! {
-    "jmp"(Jump(imm, loc)) = {
-        (imm, loc) <= Or<
-            JumpOffsets,
-            Offset<13,false>,
-            _
-        >
-        => (*imm, *loc)
-    }
-    "ret"(Call(CallVariant::Ret, loc)) = {
-        loc = Offset<6,false>
-    }
-    "echo"
-    (Echo(tar1,tar2,next)) = {
-        (tar1,((),(tar2,next))) <= Then<
-            ReferenceParser<5>,
-            Then<
-                Comma,
-                Then<
-                    ReferenceParser<5>,
-                    BoolFlag<Then<Comma, Alone<Arrow>>>
-                >,
-           >
-        > => (*tar1,((),(*tar2,*next)))
-    }
-    (EchoLong(target)) = {
-        target = ReferenceParser<10>
-    }
-    "inc"(Alu(AluVariant::Inc, target)) =
-    "dec"(Alu(AluVariant::Dec, target)) =
-    "rol"(Alu(AluVariant::RotateLeft, target)) =
-    "ror"(Alu(AluVariant::RotateRight, target)) =
-    {
-        target = ReferenceParser<5>
-    }
-    "add"
-    (Alu(AluVariant::Add, target)) =
-    (Alu2(Alu2Variant::Add, output, target)) =
-    "sub"
-    (Alu(AluVariant::Sub, target)) =
-    (Alu2(Alu2Variant::Sub, output, target)) =
-    "shl"
-    (Alu(AluVariant::ShiftLeft, target)) =
-    (Alu2(Alu2Variant::ShiftLeft, output, target)) =
-    "shr"
-    (Alu(AluVariant::ShiftRight, target)) ={
-        target = ReferenceParser<5>
-    }
-    (Alu2(Alu2Variant::ShiftRight, output, target)) ={
-        (output, target) <= CommaBetween<
-            Flatten<Then<
-                Flag<Keyword<High>, Keyword<Low>>,
-                Maybe<
-                    Then<Flag<Arrow, Plus>, Flag<Keyword<High>, Keyword<Low>>>
-		        >,
-            >, _>,
-            ReferenceParser<5>
-        > => (*output, *target)
-    }
-    
+	"jmp"(Jump(imm, loc)) = {
+		(imm, loc) <= Or<
+			JumpOffsets,
+			Offset<13,false>,
+			_
+		>
+		=> (*imm, *loc)
+	}
+	"ret"(Call(CallVariant::Ret, loc)) = {
+		loc = Offset<6,false>
+	}
+	"echo"
+	(Echo(tar1,tar2,next)) = {
+		(tar1,(tar2,next)) <= CommaBetween<
+			ReferenceParser<5>,
+			Then<
+				ReferenceParser<5>,
+				BoolFlag<Then<Comma, Alone<Arrow>>>
+			>,
+		> => (*tar1,(*tar2,*next))
+	}
+	(EchoLong(target)) = {
+		target = ReferenceParser<10>
+	}
+	"inc"(Alu(AluVariant::Inc, target)) =
+	"dec"(Alu(AluVariant::Dec, target)) =
+	"rol"(Alu(AluVariant::RotateLeft, target)) =
+	"ror"(Alu(AluVariant::RotateRight, target)) =
+	{
+		target = ReferenceParser<5>
+	}
+	"add"
+	(Alu(AluVariant::Add, target)) =
+	(Alu2(Alu2Variant::Add, output, target)) =
+	"sub"
+	(Alu(AluVariant::Sub, target)) =
+	(Alu2(Alu2Variant::Sub, output, target)) =
+	"shl"
+	(Alu(AluVariant::ShiftLeft, target)) =
+	(Alu2(Alu2Variant::ShiftLeft, output, target)) =
+	"shr"
+	(Alu(AluVariant::ShiftRight, target)) ={
+		target = ReferenceParser<5>
+	}
+	(Alu2(Alu2Variant::ShiftRight, output, target)) ={
+		(output, target) <= CommaBetween<
+			Flatten<Then<
+				Flag<Keyword<High>, Keyword<Low>>,
+				Maybe<
+					Then<Flag<Arrow, Plus>, Flag<Keyword<High>, Keyword<Low>>>
+				>,
+			>, _>,
+			ReferenceParser<5>
+		> => (*output, *target)
+	}
+
 }
