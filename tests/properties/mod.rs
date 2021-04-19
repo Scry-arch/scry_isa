@@ -1,5 +1,5 @@
-use quickcheck::{Arbitrary, Gen, TestResult};
-use rand::seq::SliceRandom;
+use quickcheck::{empty_shrinker, Arbitrary, Gen, TestResult};
+use rand::{seq::SliceRandom, Rng};
 use scry_isa::{Instruction, Parser};
 use std::cell::Cell;
 
@@ -229,4 +229,226 @@ fn error_index_only_in_instruction(
 		},
 		|_| TestResult::discard(),
 	)
+}
+
+#[derive(Clone, Debug)]
+struct Symbol(String);
+impl Arbitrary for Symbol
+{
+	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	{
+		const SYMBOL_CHARS: &'static str =
+			"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.";
+
+		let size = g.gen_range(1, g.size());
+		let mut result = String::new();
+
+		// First character cannot be numeric
+		result.push(
+			SYMBOL_CHARS
+				.chars()
+				.nth(g.gen_range(10, SYMBOL_CHARS.len()))
+				.unwrap(),
+		);
+
+		for _ in 1..size
+		{
+			result.push(
+				SYMBOL_CHARS
+					.chars()
+					.nth(g.gen_range(0, SYMBOL_CHARS.len()))
+					.unwrap(),
+			);
+		}
+		Self(result)
+	}
+
+	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
+	{
+		if self.0.len() == 1
+		{
+			return empty_shrinker();
+		}
+
+		let mut result = Vec::new();
+
+		for i in 0..self.0.len()
+		{
+			let mut copy = self.0.clone();
+			copy.remove(i);
+			result.push(Self(copy));
+		}
+
+		Box::new(
+			result
+				.into_iter()
+				.filter(|Symbol(s)| !s.chars().nth(0).unwrap().is_numeric()),
+		)
+	}
+}
+#[derive(Clone, Debug)]
+struct OffsetInstruction(Instruction);
+impl Arbitrary for OffsetInstruction
+{
+	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	{
+		use Instruction::*;
+		loop
+		{
+			let instruction = Instruction::arbitrary(g);
+			match &instruction
+			{
+				Jump(..) | Call(..) => return Self(instruction),
+				_ => (),
+			}
+		}
+	}
+}
+impl OffsetInstruction
+{
+	fn offset_index(&self) -> impl Iterator<Item = usize>
+	{
+		use Instruction::*;
+		match self.0
+		{
+			Jump(..) => [1, 2].iter(),
+			Call(..) => [1].iter(),
+			_ => panic!("Instruction doesn't have offset operand."),
+		}
+		.cloned()
+	}
+}
+
+/// Tests that instructions that take address offset operands accept any symbol
+/// instead of integer offsets.
+#[quickcheck]
+fn accepts_symbol_offsets(instr: OffsetInstruction, Symbol(sym): Symbol, skip: usize) -> bool
+{
+	let mut buffer = String::new();
+	Instruction::print(&instr.0, &mut buffer).unwrap();
+	let mut tokens: Vec<_> = buffer.split(" ").collect();
+
+	// Extract offset value
+	let offset_index = instr
+		.offset_index()
+		.skip(skip % instr.offset_index().count())
+		.next()
+		.unwrap();
+	let split = tokens[offset_index].split_at(
+		tokens[offset_index]
+			.find(",")
+			.unwrap_or(tokens[offset_index].len()),
+	);
+	let offset_value: i32 = split.0.parse().unwrap();
+
+	// replace offset with symbol
+	let mut replacement = String::from(sym.as_str());
+	replacement.push_str(split.1);
+	tokens[offset_index] = replacement.as_str();
+
+	Instruction::parse(tokens.into_iter(), &|_, _| offset_value).is_ok()
+}
+
+#[derive(Clone, Debug)]
+struct ReferenceInstruction(Instruction);
+impl Arbitrary for ReferenceInstruction
+{
+	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	{
+		use Instruction::*;
+		loop
+		{
+			let instruction = Instruction::arbitrary(g);
+			match &instruction
+			{
+				Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) => return Self(instruction),
+				_ => (),
+			}
+		}
+	}
+}
+impl ReferenceInstruction
+{
+	fn reference_index(&self) -> impl Iterator<Item = usize>
+	{
+		use Instruction::*;
+		match self.0
+		{
+			Echo(..) => [1, 2].iter(),
+			EchoLong(..) | Alu(..) => [1].iter(),
+			Alu2(..) => [2].iter(),
+			_ => panic!("Instruction doesn't have reference operand."),
+		}
+		.cloned()
+	}
+}
+
+#[derive(Clone, Debug)]
+struct Reference(Vec<Symbol>);
+impl Arbitrary for Reference
+{
+	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	{
+		let mut result = Vec::<Symbol>::arbitrary(g);
+		// Ensure there is at least 1
+		result.push(Arbitrary::arbitrary(g));
+		Self(result)
+	}
+
+	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
+	{
+		let mut result: Vec<_> = Vec::new();
+		result.extend(self.0.clone().shrink().filter(|v| !v.is_empty()));
+
+		for i in 0..self.0.len()
+		{
+			result.extend(self.0[i].shrink().map(|sym| {
+				let mut copy = self.0.clone();
+				copy[i] = sym;
+				copy
+			}));
+		}
+
+		Box::new(result.into_iter().map(|vec| Self(vec)))
+	}
+}
+
+/// Tests that instructions that take output target operands accept any symbol
+/// reference chain instead of integer reference.
+#[quickcheck]
+fn accepts_symbol_references(
+	instr: ReferenceInstruction,
+	Reference(symbols): Reference,
+	skip: usize,
+) -> bool
+{
+	let mut buffer = String::new();
+	Instruction::print(&instr.0, &mut buffer).unwrap();
+	let mut tokens: Vec<_> = buffer.split(" ").collect();
+
+	// Extract reference value
+	let reference_index = instr
+		.reference_index()
+		.skip(skip % instr.reference_index().count())
+		.next()
+		.unwrap();
+	let split = tokens[reference_index]
+		// remove the preceding '=>'
+		.split_at(2).1
+		// potentially remove ',' at end
+		.split_at(tokens[reference_index].find(",").unwrap_or(tokens[reference_index].len())-2);
+
+	let reference_value: i32 = split.0.parse().unwrap();
+
+	// replace reference with symbols
+	let mut replacement = String::new();
+	for i in 0..std::cmp::min(reference_value + 1, symbols.len() as i32)
+	{
+		replacement.push_str("=>");
+		replacement.push_str(symbols[i as usize].0.as_str());
+	}
+	replacement.push_str(split.1);
+	tokens[reference_index] = replacement.as_str();
+
+	Instruction::parse(tokens.into_iter(), &|_, _| 2).is_ok()
 }

@@ -500,7 +500,7 @@ duplicate_inline! {
 		const ALONE_LEFT: bool = false;
 
 		fn parse<F>(
-			tokens: impl Iterator<Item = &'a str> + Clone,
+			mut tokens: impl Iterator<Item = &'a str> + Clone,
 			_: &F,
 		) -> Result<(Self::Internal, usize, usize), usize>
 		where
