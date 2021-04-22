@@ -66,112 +66,101 @@ fn consumes_only_instruction_tokens(instr: Instruction, extra: String) -> bool
 	(consumed == (instr_tokens.len() - 1)) && (bytes == instr_tokens.last().unwrap().len())
 }
 
+/// Represents the different ways separator character sequences (",", "=>",
+/// etc.) can be in separate tokens
 #[derive(Clone, Copy, Debug)]
-enum CommaType
+enum SeparatorType
 {
+	/// The separator is at the end of a token with other text preceding it.
 	AtEnd,
+	/// The separator is at the start of a token with other text succeeding it.
 	AtStart,
+	/// The separator is in the middle of a token with text both preding and
+	/// succeeding it.
 	InMiddle,
+	/// The separator is alone in the token, with no other text.
 	Alone,
 }
 
-impl Arbitrary for CommaType
+impl Arbitrary for SeparatorType
 {
 	fn arbitrary<G: Gen>(g: &mut G) -> Self
 	{
-		use CommaType::*;
+		use SeparatorType::*;
 		*[AtEnd, AtStart, InMiddle, Alone].choose(g).unwrap()
 	}
 }
 
-/// Tests that all possible comma combinations are supported for any instruction
-/// with commas:
-/// 1. Comma as the end of a token with other text.
-/// 1. Comma alone as a token.
-/// 1. Comma as the start of a token with other text.
-/// 1. Comma in the middle of a token, with text on both sides.
+/// Tests that all possible separator combinations are supported for any
+/// instruction with separators.
 #[quickcheck]
-fn different_commas(
+fn different_separators(
 	instr: Instruction,
-	t1: CommaType,
-	t_rest: Vec<CommaType>,
+	t1: SeparatorType,
+	t_rest: Vec<SeparatorType>,
 ) -> quickcheck::TestResult
 {
+	const SEPARATORS: &[&'static str] = &["=>", "+", ","];
+
 	let mut buffer = String::new();
 	Instruction::print(&instr, &mut buffer).unwrap();
 
 	// We make an infinite iterator producing comma types for use in the following
 	// loop. We do this to ensure some variety to the types each match block gets.
-	let mut comma_types = Some(t1).into_iter().chain(t_rest.into_iter()).cycle();
+	let mut separator_types = Some(t1).into_iter().chain(t_rest.into_iter()).cycle();
 
-	if buffer.contains(",")
+	if let Some(_) = SEPARATORS.iter().find(|sep| buffer.contains(*sep))
 	{
-		let mut new_buffer = String::new();
+		let mut edited_assembly = String::new();
+		let mut rest = buffer.as_str();
 
-		for t in buffer.split(",")
+		while let Some((idx, separator)) = SEPARATORS
+			.iter()
+			.find_map(|sep| rest.find(sep).map(|idx| (idx, sep)))
 		{
-			use CommaType::*;
-			if new_buffer.ends_with(" ")
+			let (split1, split2) = rest.split_at(idx);
+
+			let next_separator_type = separator_types.next().unwrap();
+			match next_separator_type
 			{
-				// Is Alone or AtStart(of next token)
-				match comma_types.next().unwrap()
+				// Remove any spaces before the separator to ensure it stays in the same token as
+				// preceding text
+				SeparatorType::AtEnd | SeparatorType::InMiddle =>
 				{
-					AtEnd | InMiddle =>
-					{
-						// Remove the space and replace with comma
-						new_buffer.pop().unwrap();
-						new_buffer.push(',');
-					},
-					_ => (),
-				}
-				new_buffer.push_str(t);
+					edited_assembly.push_str(split1.trim_end())
+				},
+				// Add a space before separator to ensure it is separated into a different token
+				// Than preceding text
+				_ =>
+				{
+					edited_assembly.push_str(split1);
+					edited_assembly.push(' ');
+				},
 			}
-			else
+			edited_assembly.push_str(separator);
+			let after_separator = split2.split_at(separator.len()).1;
+			rest = match next_separator_type
 			{
-				if t.starts_with(" ")
+				// Remove any spaces after the separator to ensure it stays in the same token as
+				// succeeding text
+				SeparatorType::AtStart | SeparatorType::InMiddle => after_separator.trim_start(),
+				// Add a space after separator to ensure it is separated into a different token
+				// than succeeding text
+				_ =>
 				{
-					// Comma is AtEnd (of prev token) or Alone
-					new_buffer.push(',');
-					match comma_types.next().unwrap()
-					{
-						AtStart | InMiddle =>
-						{
-							// Remove space
-							new_buffer.push_str(&t[1..]);
-						},
-						_ => new_buffer.push_str(t),
-					}
-				}
-				else if !new_buffer.is_empty()
-				{
-					// Comma is InMiddle
-					match comma_types.next().unwrap()
-					{
-						AtStart =>
-						{
-							new_buffer.push_str(" ,");
-						},
-						AtEnd =>
-						{
-							new_buffer.push_str(", ");
-						},
-						Alone =>
-						{
-							new_buffer.push_str(" , ");
-						},
-						InMiddle => new_buffer.push(','),
-					}
-					new_buffer.push_str(t)
-				}
-				else
-				{
-					assert!(new_buffer.is_empty());
-					new_buffer.push_str(t)
-				}
-			}
+					edited_assembly.push(' ');
+					after_separator
+				},
+			};
 		}
+		edited_assembly.push_str(rest);
+
 		TestResult::from_bool(
-			Instruction::parse(new_buffer.split(" ").into_iter(), &|_, _| unreachable!()).is_ok(),
+			Instruction::parse(
+				edited_assembly.split(" ").filter(|t| !t.is_empty()),
+				&|_, _| unreachable!(),
+			)
+			.is_ok(),
 		)
 	}
 	else

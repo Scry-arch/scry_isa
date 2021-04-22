@@ -343,8 +343,13 @@ macro_rules! map_mnemonics_impl {
                     };
                 }
 
-                let mnemonic = tokens.next().ok_or_else(|| 0usize)?;
-                if let Some(parser_idx) = MNEMONIC_PARSERS.get(mnemonic) {
+                let first_token = tokens.next().ok_or_else(|| 0usize)?;
+                if let Some((mnemonic, parser_idx)) = MNEMONIC_PARSERS.iter()
+                    .find(|(mnemonic, _)| first_token.starts_with(*mnemonic))
+                {
+                    let consumed_first = first_token.len() == mnemonic.len();
+                    let tokens = Some(first_token.split_at(mnemonic.len()).1).into_iter()
+                        .filter(|t| !t.is_empty()).chain(tokens);
                     $(
                         if *parser_idx == ($idx) {
                             let mut furthest_error_idx = 0;
@@ -366,7 +371,9 @@ macro_rules! map_mnemonics_impl {
                     {
                         unreachable!()
                     }
-                    .map_or_else(|idx: usize| Err(idx+1), |(instr, consumed, bytes)| Ok((instr, consumed+1, bytes)))
+                    .map_or_else(
+                        |idx: usize| Err(idx+(consumed_first as usize)),
+                        |(instr, consumed, bytes)| Ok((instr, consumed+(consumed_first as usize), bytes + (mnemonic.len()*(!consumed_first as usize)))))
                 }else {
                     Err(0)
                 }
