@@ -261,7 +261,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 					next_result = Then::<Arrow, Symbol>::parse(tokens, f).and_then(
 						|(((), sym), consumed2, bytes2)| {
 							let next_consumed = consumed + consumed2;
-							let next_bytes = bytes2 + bytes;
+							let next_bytes = bytes2 + (bytes * ((consumed2 == 0) as usize));
 
 							if next_branch_to
 							{
