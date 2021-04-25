@@ -19,7 +19,7 @@ fn print_then_parse(instr: Instruction) -> bool
 	}
 	else
 	{
-		match Instruction::parse(buffer.split(" "), &|_, _| unreachable!())
+		match Instruction::parse(buffer.split_ascii_whitespace(), &|_, _| unreachable!())
 		{
 			Ok((instr2, ..)) =>
 			{
@@ -33,11 +33,11 @@ fn print_then_parse(instr: Instruction) -> bool
 					true
 				}
 			},
-			Err(idx) =>
+			Err(err) =>
 			{
 				println!(
-					"Failed to parse instruction.\nText: '{}'\nError Index: {}",
-					buffer, idx
+					"Failed to parse instruction.\nText: '{}'\nError: {:?}",
+					buffer, err
 				);
 				false
 			},
@@ -45,12 +45,13 @@ fn print_then_parse(instr: Instruction) -> bool
 	}
 }
 
-/// Tests that if parsing fails because of bad syntax, the reported index is
+/// Tests that if parsing fails because of bad syntax, the reported span is
 /// always within the tokens of the instruction
 #[quickcheck]
-fn error_index_only_in_instruction(
+fn error_only_in_instruction(
 	instr: Instruction,
 	inject: char,
+	inject_rest: String,
 	mut inject_idx: usize,
 	postfix: String,
 ) -> TestResult
@@ -58,22 +59,22 @@ fn error_index_only_in_instruction(
 	let mut buffer = String::new();
 	Instruction::print(&instr, &mut buffer).unwrap();
 
-	// We also count commas because they can be on their own, but the default
-	// print puts at adjacent to teh previous token, which means space counting
-	// doesn't count the comma.
-	let instr_token_count = buffer.split(" ").count() + (buffer.split(",").count() - 1);
-
 	// Inject string at next char boundary
 	inject_idx = inject_idx % buffer.as_str().len();
 	while !buffer.as_str().is_char_boundary(inject_idx)
 	{
 		inject_idx += 1;
 	}
+	// Inject last chars first so we don't have to change the index
+	buffer.insert_str(inject_idx, inject_rest.as_str());
+	// Then insert the first char before the previously inserted
 	buffer.insert(inject_idx, inject);
+	let instr_token_count = buffer.split_ascii_whitespace().count();
 
 	buffer.push_str(postfix.as_str());
 	let injected_symbol = Cell::new(false);
-	Instruction::parse(buffer.split(" ").into_iter(), &|start, end| {
+	let tokens = buffer.split_ascii_whitespace().into_iter();
+	Instruction::parse(tokens.clone(), &|start, end| {
 		if let Some(start) = start
 		{
 			injected_symbol.set(start.contains(inject))
@@ -82,14 +83,19 @@ fn error_index_only_in_instruction(
 		0
 	})
 	.map_or_else(
-		|idx| {
+		|err| {
 			if injected_symbol.get()
 			{
 				TestResult::discard()
 			}
 			else
 			{
-				TestResult::from_bool(idx < instr_token_count)
+				TestResult::from_bool(
+					err.start_token < instr_token_count
+						&& err.end_token < instr_token_count
+						&& err.start_idx < tokens.clone().nth(err.start_token).unwrap().len()
+						&& err.end_idx <= tokens.clone().nth(err.end_token).unwrap().len(),
+				)
 			}
 		},
 		|_| TestResult::discard(),
@@ -298,7 +304,10 @@ impl AssemblyInstruction
 	{
 		let mut buffer = String::new();
 		Instruction::print(&self.0, &mut buffer).unwrap();
-		let mut tokens: Vec<_> = buffer.split(" ").map(|t| String::from(t)).collect();
+		let mut tokens: Vec<_> = buffer
+			.split_ascii_whitespace()
+			.map(|t| String::from(t))
+			.collect();
 
 		let mut symbol_addresses = HashMap::new();
 
@@ -380,7 +389,7 @@ impl AssemblyInstruction
 fn parse_assembly(assembly: AssemblyInstruction) -> bool
 {
 	let (tokens, resolver) = assembly.tokens_and_resolver();
-	Instruction::parse(tokens.split(" "), &resolver).is_ok()
+	Instruction::parse(tokens.split_ascii_whitespace(), &resolver).is_ok()
 }
 
 /// Tests that the number of tokens and bytes consumed by parsing is exactly
@@ -391,8 +400,8 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 {
 	let (tokens, resolver) = assembly.tokens_and_resolver();
 
-	let instr_tokens: Vec<_> = tokens.split(" ").filter(|t| !t.is_empty()).collect();
-	let extra_tokens: Vec<_> = extra.split(" ").collect();
+	let instr_tokens: Vec<_> = tokens.split_ascii_whitespace().collect();
+	let extra_tokens: Vec<_> = extra.split_ascii_whitespace().collect();
 
 	let (_, consumed, bytes) = Instruction::parse(
 		instr_tokens.iter().cloned().chain(extra_tokens.into_iter()),
@@ -492,11 +501,7 @@ fn different_separator_tokenization(
 		edited_assembly.push_str(rest);
 
 		TestResult::from_bool(
-			Instruction::parse(
-				edited_assembly.split(" ").filter(|t| !t.is_empty()),
-				&resolver,
-			)
-			.is_ok(),
+			Instruction::parse(edited_assembly.split_ascii_whitespace(), &resolver).is_ok(),
 		)
 	}
 	else

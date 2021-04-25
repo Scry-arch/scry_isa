@@ -1,11 +1,118 @@
-use crate::instructions::{Alu2OutputVariant, Bits};
+use crate::{
+	instructions::{Alu2OutputVariant, Bits},
+	ParseErrorType::OutOfBoundValue,
+};
 use duplicate::duplicate_inline;
 use std::{
-	cmp::max,
 	convert::{TryFrom, TryInto},
 	fmt::Write,
 	marker::PhantomData,
 };
+
+/// The type of error parsing encountered.
+#[derive(Debug, Clone)]
+pub enum ParseErrorType<'a>
+{
+	/// Couldn't resolve symbol
+	UnkownSymbol,
+
+	/// Invalid use of symbol.
+	///
+	/// Given is a description of what was expected of the symbol
+	InvalidSymbol(&'a str),
+
+	/// Invalid number value.
+	///
+	/// First element is the found value.
+	/// Second is the allowed lower bound
+	/// Third is the allowed upper bound.
+	OutOfBoundValue(isize, isize, isize),
+
+	/// Unexpected characters.
+	///
+	/// Given is a description of expected characters.
+	UnexpectedChars(&'a str),
+
+	/// Token stream ended unexpectedly.
+	EndOfStream,
+
+	/// Internal Error that shouldn't propagate outside the crate.
+	///
+	/// Please file a bug report with the given string refering to where in the
+	/// source the error originates.
+	InternalError(&'a str),
+}
+impl<'a> ParseErrorType<'a>
+{
+	fn from_bits<const SIZE: u32, const SIGNED: bool>(value: isize) -> Self
+	{
+		OutOfBoundValue(
+			value,
+			Bits::<SIZE, SIGNED>::min().value() as isize,
+			Bits::<SIZE, SIGNED>::max().value() as isize,
+		)
+	}
+}
+
+/// The span and type of error parsing encountered.
+///
+/// The span is a range of characters that parsing has deemed the source of the
+/// error. It starts in one token, at a specific index, and ranges to another
+/// token (or the same) at an index.
+#[derive(Debug, Clone)]
+pub struct ParseError<'a>
+{
+	/// The index of the first token in the span
+	pub start_token: usize,
+	/// The index in the first token at which the span starts.
+	pub start_idx: usize,
+	/// The index of the last token in the span
+	pub end_token: usize,
+	/// The index following the last character of the last token in the span
+	pub end_idx: usize,
+	/// The error type.
+	pub err_type: ParseErrorType<'a>,
+}
+impl<'a> ParseError<'a>
+{
+	pub fn from_token(token: &str, idx: usize, err_type: ParseErrorType<'a>) -> Self
+	{
+		Self {
+			start_token: idx,
+			start_idx: 0,
+			end_token: idx,
+			end_idx: token.len(),
+			err_type,
+		}
+	}
+
+	pub fn from_no_span(err_type: ParseErrorType<'a>) -> Self
+	{
+		Self {
+			start_token: 0,
+			start_idx: 0,
+			end_token: 0,
+			end_idx: 0,
+			err_type,
+		}
+	}
+
+	pub fn replace_if_further(&mut self, other: &Self)
+	{
+		let other_start_after = self.start_token < other.start_token
+			|| (self.start_token == other.start_token && self.start_idx < other.start_idx);
+		let other_start_equal =
+			self.start_token == other.start_token && self.start_idx == other.start_idx;
+
+		let self_end_after = self.end_token > other.end_token
+			|| (self.end_token == other.end_token && self.end_idx > other.end_idx);
+
+		if other_start_after || (other_start_equal && self_end_after)
+		{
+			*self = other.clone();
+		}
+	}
+}
 
 pub trait Parser<'a>
 {
@@ -30,10 +137,14 @@ pub trait Parser<'a>
 	/// If x has a higher adderss than y, the result should be negative.
 	/// If (None, y), the first symbol is the one for the current instruction
 	/// being parsed.
+	///
+	/// The given iterator must produce tokens of only ASCII characters free of
+	/// whitespace. Effectively, the iterator must behave as if it was produced
+	/// by [`split_ascii_whitespace`](https://doc.rust-lang.org/std/primitive.str.html#method.split_ascii_whitespace)
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		_: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32;
 
@@ -89,18 +200,24 @@ impl<'a> Parser<'a> for u16
 	fn parse<F>(
 		mut tokens: impl Iterator<Item = &'a str> + Clone,
 		_: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let value_string = tokens.next()
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
 			// Extract digits from beginning
-			.map(|t| t.splitn(2, |c| !char::is_digit(c, 10)).next().unwrap())
-			.ok_or_else(|| 0usize)?;
+			.map(|t| t.splitn(2, |c| !char::is_digit(c, 10)).next().unwrap())?;
 		value_string
 			.parse()
 			.map(|v| (v, 0, value_string.len()))
-			.map_err(|_| 0usize)
+			.map_err(|_| {
+				ParseError::from_token(
+					value_string,
+					0,
+					ParseErrorType::UnexpectedChars("unsigned integer"),
+				)
+			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
@@ -119,20 +236,26 @@ impl<'a> Parser<'a> for i32
 	fn parse<F>(
 		mut tokens: impl Iterator<Item = &'a str> + Clone,
 		_: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let value_string = tokens.next()
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
 			// Extract digits from beginning
 			.map(|first_token| first_token.splitn(2,
 				|c| (!char::is_digit(c, 10)) && (c != '-')).next().unwrap()
-			)
-			.ok_or_else(|| 0usize)?;
+			)?;
 		value_string
 			.parse()
 			.map(|v| (v, 0, value_string.len()))
-			.map_err(|_| 0usize)
+			.map_err(|_| {
+				ParseError::from_token(
+					value_string,
+					0,
+					ParseErrorType::UnexpectedChars("signed or unsigned integer"),
+				)
+			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
@@ -152,23 +275,42 @@ impl<'a> Parser<'a> for Symbol
 	fn parse<F>(
 		mut tokens: impl Iterator<Item = &'a str> + Clone,
 		_: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
+		let error_type =
+			ParseErrorType::UnexpectedChars("a symbol that start with a letter, '_', or '.'");
 		tokens
 			.next()
-			.filter(|t| !t.starts_with(char::is_numeric))
-			.map(|t| {
-				t.splitn(2, |c: char| {
-					!(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-				})
-				.next()
-				.unwrap()
+			.ok_or_else(|| ParseError::from_token("", 0, ParseErrorType::EndOfStream))
+			.and_then(|t| {
+				if t.starts_with(char::is_numeric)
+				{
+					Err(ParseError::from_token(t, 0, error_type.clone()))
+				}
+				else
+				{
+					Ok(t)
+				}
 			})
-			.filter(|t| !t.is_empty())
+			.and_then(|t| {
+				let sym = t
+					.splitn(2, |c: char| {
+						!(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+					})
+					.next()
+					.unwrap();
+				if sym.is_empty()
+				{
+					Err(ParseError::from_token(t, 0, error_type))
+				}
+				else
+				{
+					Ok(sym)
+				}
+			})
 			.map(|sym| (sym, 0, sym.len()))
-			.ok_or(0usize)
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
@@ -188,7 +330,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -206,8 +348,18 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 				.map(|(symbol, consumed, bytes)| (f(None, symbol) / 2, consumed, bytes))
 		})
 		.and_then(|(value, consumed, bytes)| {
-			Bits::<SIZE, SIGNED>::new(value)
-				.map_or_else(|| Err(0usize), |b| Ok((b, consumed, bytes)))
+			Bits::<SIZE, SIGNED>::new(value).map_or_else(
+				|| {
+					Err(ParseError {
+						start_token: 0,
+						start_idx: 0,
+						end_token: consumed,
+						end_idx: bytes,
+						err_type: ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
+					})
+				},
+				|b| Ok((b, consumed, bytes)),
+			)
 		})
 	}
 
@@ -228,21 +380,38 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Then::<Arrow, u16>::parse(tokens.clone(), f)
 			.and_then(|(((), value), consumed, bytes)| {
-				Bits::new(value as i32).map_or_else(|| Err(0), |b| Ok((b, consumed, bytes)))
+				Bits::new(value as i32).map_or_else(
+					|| {
+						Err(ParseError::from_token(
+							tokens.clone().next().unwrap().split_at(2).1,
+							consumed,
+							ParseErrorType::from_bits::<SIZE, false>(value as isize),
+						))
+					},
+					|b| Ok((b, consumed, bytes)),
+				)
 			})
-			.or_else(|idx| {
+			.or_else(|mut err| {
 				let mut result = Then::<Arrow, Symbol>::parse(tokens.clone(), f).and_then(
 					|(((), sym1), consumed, bytes)| {
 						let off1 = (f(None, sym1) / 2) - 1;
 						if off1 < 0
 						{
-							Err(consumed)
+							Err(ParseError {
+								start_token: consumed,
+								start_idx: 2 * ((consumed == 0) as usize),
+								end_token: consumed,
+								end_idx: (2 * ((consumed == 0) as usize)) + sym1.len(),
+								err_type: ParseErrorType::InvalidSymbol(
+									"must be at or follow the instruction",
+								),
+							})
 						}
 						else
 						{
@@ -251,7 +420,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 					},
 				);
 				let mut next_branch_to = true;
-				let mut next_result = result;
+				let mut next_result = result.clone();
 				while let Ok(((sym1, offset), consumed, bytes)) = next_result
 				{
 					result = Ok(((sym1, offset), consumed, bytes));
@@ -272,7 +441,16 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								let next_offset = f(Some(sym1), sym) / 2;
 								if next_offset < 0
 								{
-									Err(consumed)
+									Err(ParseError {
+										start_token: next_consumed,
+										start_idx: bytes * ((consumed2 == 0) as usize),
+										end_token: next_consumed,
+										end_idx: sym.len() + (bytes * ((consumed2 == 0) as usize)),
+										err_type: ParseErrorType::InvalidSymbol(
+											"must refer to an address higher than the previous \
+											 label in the chain",
+										),
+									})
 								}
 								else
 								{
@@ -285,7 +463,16 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 				}
 				result.and_then(|((_, offset), consumed, bytes)| {
 					Bits::new(offset)
-						.ok_or(max(consumed, idx))
+						.ok_or({
+							err.replace_if_further(&ParseError {
+								start_token: 0,
+								start_idx: 0,
+								end_token: consumed,
+								end_idx: bytes,
+								err_type: ParseErrorType::from_bits::<SIZE, false>(offset as isize),
+							});
+							err
+						})
 						.map(|b| (b, consumed, bytes))
 				})
 			})
@@ -309,7 +496,7 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for CommaBetween<'
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -336,7 +523,7 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -358,10 +545,19 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 							bytes2 + (bytes * ((consumed2 == 0) as usize)),
 						))
 					},
-					Err(idx) => Err(consumed + idx),
+					Err(err) =>
+					{
+						Err(ParseError {
+							start_token: consumed + err.start_token,
+							start_idx: err.start_idx + ((err.start_token == 0) as usize * bytes),
+							end_token: consumed + err.end_token,
+							end_idx: err.end_idx + ((err.end_token == 0) as usize * bytes),
+							err_type: err.err_type,
+						})
+					},
 				}
 			},
-			Err(idx) => Err(idx),
+			Err(err) => Err(err),
 		}
 	}
 
@@ -391,7 +587,7 @@ where
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -402,10 +598,19 @@ where
 				match result.try_into()
 				{
 					Ok(result) => return Ok((result, consumed, bytes)),
-					_ => 0,
+					_ =>
+					{
+						ParseError {
+							start_token: 0,
+							start_idx: 0,
+							end_token: consumed,
+							end_idx: bytes,
+							err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!())),
+						}
+					},
 				}
 			},
-			Err(idx) => idx,
+			Err(err) => err,
 		};
 
 		match P2::parse(tokens, f)
@@ -418,7 +623,13 @@ where
 					_ => Err(err1),
 				}
 			},
-			Err(err2) => Err(max(err1, err2)),
+			Err(mut err2) =>
+			{
+				Err({
+					err2.replace_if_further(&err1);
+					err2
+				})
+			},
 		}
 	}
 
@@ -455,15 +666,27 @@ impl<'a, I: HasWord> Parser<'a> for Keyword<I>
 	fn parse<F>(
 		mut tokens: impl Iterator<Item = &'a str> + Clone,
 		_: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		tokens
 			.next()
-			.filter(|t| t.starts_with(I::WORD))
-			.map(|_| ((), 0, I::WORD.len()))
-			.ok_or(0)
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+			.and_then(|t| {
+				if t.starts_with(I::WORD)
+				{
+					Ok(((), 0, I::WORD.len()))
+				}
+				else
+				{
+					Err(ParseError::from_token(
+						t,
+						0,
+						ParseErrorType::UnexpectedChars(I::WORD),
+					))
+				}
+			})
 	}
 
 	fn print(_: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
@@ -502,13 +725,21 @@ duplicate_inline! {
 		fn parse<F>(
 			mut tokens: impl Iterator<Item = &'a str> + Clone,
 			_: &F,
-		) -> Result<(Self::Internal, usize, usize), usize>
+		) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 		where
 			F: Fn(Option<&str>, &str) -> i32
 		{
-			tokens.next().filter(|t| t.starts_with(text))
-				.map(|_| ((), 0, text.len()))
-				.ok_or(0)
+			tokens.next()
+				.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+				.and_then(|t| if t.starts_with(text) {
+					Ok(((), 0, text.len()))
+				} else {
+					Err(ParseError::from_token(
+						t,
+						0,
+						ParseErrorType::UnexpectedChars(text),
+					))
+				})
 		}
 
 		fn print(_: &Self::Internal, out: &mut impl Write) -> std::fmt::Result {
@@ -528,7 +759,7 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a, P>
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -567,7 +798,7 @@ where
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -608,7 +839,7 @@ where
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -620,7 +851,13 @@ where
 				match P2::parse(tokens, f)
 				{
 					Ok((_, consumed, bytes)) => Ok((false, consumed, bytes)),
-					Err(err2) => Err(std::cmp::max(err1, err2)),
+					Err(mut err2) =>
+					{
+						Err({
+							err2.replace_if_further(&err1);
+							err2
+						})
+					},
 				}
 			},
 		}
@@ -692,7 +929,7 @@ where
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -703,7 +940,13 @@ where
 		}
 		else
 		{
-			Err(0)
+			Err(ParseError {
+				start_token: 0,
+				start_idx: 0,
+				end_token: consumed,
+				end_idx: bytes,
+				err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!())),
+			})
 		}
 	}
 
@@ -724,7 +967,7 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Alone<'a, P>
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
@@ -748,24 +991,33 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	fn parse<F>(
 		tokens: impl Iterator<Item = &'a str> + Clone,
 		f: &F,
-	) -> Result<(Self::Internal, usize, usize), usize>
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let starts_with_symbol = Symbol::parse(tokens.clone(), &|_, _| 0).is_ok();
 		let ((off1, off2), consumed, bytes) =
 			CommaBetween::<Offset<8, true>, Offset<6, false>>::parse(tokens, f)?;
-		if starts_with_symbol && off1.value() > 0
+		let value = if starts_with_symbol && off1.value() > 0
 		{
 			// Offset 1 is relative to off2
-			Bits::new(off1.value() - off2.value())
-				.map_or(Err(0), |v| Ok(((v, off2), consumed, bytes)))
+			off1.value() - off2.value()
 		}
 		else
 		{
 			// Ensure right size for offset
-			Bits::new(off1.value()).map_or(Err(0), |v| Ok(((v, off2), consumed, bytes)))
-		}
+			off1.value()
+		};
+		Bits::new(value).map_or(
+			Err(ParseError {
+				start_token: 0,
+				start_idx: 0,
+				end_token: consumed,
+				end_idx: bytes,
+				err_type: ParseErrorType::from_bits::<7, true>(value as isize),
+			}),
+			|v| Ok(((v, off2), consumed, bytes)),
+		)
 	}
 
 	fn print(&(off1, off2): &Self::Internal, out: &mut impl Write) -> std::fmt::Result

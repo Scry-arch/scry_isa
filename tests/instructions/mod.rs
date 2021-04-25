@@ -1,10 +1,13 @@
-use scry_isa::{Instruction, Parser};
+use scry_isa::{Instruction, ParseError, Parser};
 
 /// Parses the given string into an instruction.
 ///
 /// If parsing fails, returns the index of the token that caused the failure.
 /// 0-indexed. Tokens are whitespace-delimited
-fn parse_assembly(asm: &str, f: &impl Fn(Option<&str>, &str) -> i32) -> Result<Instruction, usize>
+fn parse_assembly<'a>(
+	asm: &'a str,
+	f: &impl Fn(Option<&str>, &str) -> i32,
+) -> Result<Instruction, ParseError<'a>>
 {
 	let tokens: Vec<_> = asm.split_ascii_whitespace().collect();
 	Instruction::parse(tokens.iter().cloned(), f).map(|(instr, ..)| instr)
@@ -54,8 +57,8 @@ macro_rules! test_assembly {
 						);
 					)?
 					panic!("No symbols given.");
-				}).unwrap_or_else(|idx|
-					panic!("Failed to parse '{}' at token '{}'", $asm, idx)
+				}).unwrap_or_else(|err|
+					panic!("Failed to parse '{}': '{:?}'", $asm, err)
 				);
 				let mut buff = String::new();
 				Instruction::print(&instr, &mut buff).unwrap();

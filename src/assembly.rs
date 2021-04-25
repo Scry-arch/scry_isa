@@ -328,7 +328,7 @@ macro_rules! map_mnemonics_impl {
             fn parse<F>(
                 mut tokens: impl Iterator<Item = &'a str> + Clone,
                 f: &F,
-            ) -> Result<(Self::Internal, usize, usize), usize>
+            ) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
             where
                 F: Fn(Option<&str>, &str) -> i32,
             {
@@ -343,7 +343,8 @@ macro_rules! map_mnemonics_impl {
                     };
                 }
 
-                let first_token = tokens.next().ok_or_else(|| 0usize)?;
+                let first_token = tokens.next()
+                    .ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))?;
                 if let Some((mnemonic, parser_idx)) = MNEMONIC_PARSERS.iter()
                     .find(|(mnemonic, _)| first_token.starts_with(*mnemonic))
                 {
@@ -352,19 +353,24 @@ macro_rules! map_mnemonics_impl {
                         .filter(|t| !t.is_empty()).chain(tokens);
                     $(
                         if *parser_idx == ($idx) {
-                            let mut furthest_error_idx = 0;
+                            let mut furthest_error = ParseError{
+                                start_token: 0, start_idx: 0,
+                                end_token: usize::MAX, end_idx: usize::MAX,
+                                err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!()))
+                            };
                             $(
-                                if let Ok(($parse_result, consumed, bytes)) = <$parser_type>::parse(tokens.clone(), f)
-                                    .or_else(|error_idx| {
-                                        furthest_error_idx = std::cmp::max(furthest_error_idx, error_idx);
-                                        Err(0)
+                                if let Ok(($parse_result, consumed, bytes)) =
+                                    <$parser_type>::parse(tokens.clone(), f)
+                                    .or_else(|err| {
+                                        furthest_error.replace_if_further(&err);
+                                        Err(err)
                                     })
                                 {
-                                    Result::<(Instruction, usize, usize), usize>::Ok(($($instr)* , consumed, bytes))
+                                    Result::<(Instruction, usize, usize), ParseError>::Ok(($($instr)* , consumed, bytes))
                                 } else
                             )+
                             {
-                                Err(furthest_error_idx)
+                                Err(furthest_error)
                             }
                         } else
                     )*
@@ -372,10 +378,20 @@ macro_rules! map_mnemonics_impl {
                         unreachable!()
                     }
                     .map_or_else(
-                        |idx: usize| Err(idx+(consumed_first as usize)),
+                        |err: ParseError| Err(ParseError{
+                            start_token: err.start_token + (consumed_first as usize),
+                            start_idx: err.start_idx +
+                                (((!consumed_first && (err.start_token == 0)) as usize)
+                                    * mnemonic.len()),
+                            end_token: err.start_token + (consumed_first as usize),
+                            end_idx: err.end_idx +
+                                (((!consumed_first && (err.end_token == 0)) as usize)
+                                    * mnemonic.len()),
+                            err_type: err.err_type
+                        }),
                         |(instr, consumed, bytes)| Ok((instr, consumed+(consumed_first as usize), bytes + (mnemonic.len()*(!consumed_first as usize)))))
                 }else {
-                    Err(0)
+                    Err(ParseError::from_token(first_token, 0, ParseErrorType::UnexpectedChars("instruction mnemonic")))
                 }
             }
 
