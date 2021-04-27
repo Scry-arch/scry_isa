@@ -11,7 +11,7 @@ use variant_count::VariantCount;
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
 pub struct Bits<const N: u32, const SIGNED: bool>
 {
-	value: i32,
+	pub value: i32,
 }
 
 impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>

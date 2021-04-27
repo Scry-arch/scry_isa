@@ -22,12 +22,14 @@ test_assembly! {
 	"dec =>target" => "dec =>1"
 	(34 target:98)
 	"add =>target" => "add =>31"
+	(30 branch:32 branch_to:40)
+	"sub =>branch=>branch_to" => "sub =>0"
 	(30 branch:34 branch_to:40)
-	"sub =>branch=>branch_to" => "sub =>1"
+	"rol =>branch=>branch_to" => "rol =>1"
 	(124 branch:130 branch_to:642 target:652)
 	"shl =>branch=>branch_to=>target" => "shl =>7"
-	(12 branch:18 branch_to:60 branch2:70 target:100)
-	"shr =>branch=>branch_to=>branch2=>target" => "shr =>7"
+	(12 branch:20 branch_to:60 branch2:70 target:100)
+	"shr =>branch=>branch_to=>branch2=>target" => "shr =>8"
 	(12 branch:18 branch_to:60 branch2:70 branch_to2:100 target:120)
-	"shr =>branch=>branch_to=>branch2=>branch_to2=>target" => "shr =>17"
+	"ror =>branch=>branch_to=>branch2=>branch_to2=>target" => "ror =>17"
 }

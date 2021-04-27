@@ -3,7 +3,7 @@ test_assembly! {
 	"ret 63"
 
 	(20 loc:36)
-	"ret loc"  => "ret 8"
-	(0 loc:126)
+	"ret loc"  => "ret 7"
+	(0 loc:128)
 	"ret loc"  => "ret 63"
 }

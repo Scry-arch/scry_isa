@@ -280,7 +280,7 @@ impl<'a> Parser<'a> for Symbol
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let error_type =
-			ParseErrorType::UnexpectedChars("a symbol that start with a letter, '_', or '.'");
+			ParseErrorType::UnexpectedChars("a symbol that start with a letter, '-', '_', or '.'");
 		tokens
 			.next()
 			.ok_or_else(|| ParseError::from_token("", 0, ParseErrorType::EndOfStream))
@@ -345,7 +345,10 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 		}
 		.or_else(|_| {
 			Symbol::parse(tokens, f)
-				.map(|(symbol, consumed, bytes)| (f(None, symbol) / 2, consumed, bytes))
+				.map(|(symbol, consumed, bytes)| {
+					let difference = f(None, symbol) / 2;
+					(difference - ((difference>0) as i32), consumed, bytes)
+				})
 		})
 		.and_then(|(value, consumed, bytes)| {
 			Bits::<SIZE, SIGNED>::new(value).map_or_else(
@@ -475,6 +478,19 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 						})
 						.map(|b| (b, consumed, bytes))
 				})
+			})
+			.or_else(|err|{
+				Arrow::parse(tokens.clone(), f).and_then(|(_, consumed, bytes)|{
+					Bits::new(0)
+						.ok_or(ParseError {
+							start_token: 0,
+							start_idx: 0,
+							end_token: consumed,
+							end_idx: bytes,
+							err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!())),
+						})
+						.map(|b| (b, consumed, bytes))
+				}).map_err(|_|err)
 			})
 	}
 

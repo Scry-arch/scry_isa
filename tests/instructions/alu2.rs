@@ -1,5 +1,6 @@
 test_assembly! {
 	"add High+Low, =>0"
+	"add High+Low, =>" =>  "add High+Low, =>0"
 	"add Low+High, =>31"
 	"add High=>Low, =>21"
 	"add Low=>High, =>24"

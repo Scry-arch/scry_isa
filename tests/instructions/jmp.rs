@@ -11,11 +11,11 @@ test_assembly! {
 	"jmp 8191" => "jmp -1, 63"
 
 	(10 start:4 end:18)
-	"jmp start, end"  => "jmp -3, 4"
+	"jmp start, end"  => "jmp -3, 3"
 	(14 end:18)
-	"jmp 0, end"  => "jmp 0, 2"
+	"jmp 0, end"  => "jmp 0, 1"
 	(26 start:2)
 	"jmp start, 5"  => "jmp -12, 5"
 	(8 end:14 after_end:24)
-	"jmp after_end, end"  => "jmp 5, 3"
+	"jmp after_end, end"  => "jmp 5, 2"
 }
