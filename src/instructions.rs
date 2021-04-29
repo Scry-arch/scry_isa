@@ -160,6 +160,21 @@ pub enum Instruction
 	/// 0. The branch location offset.
 	Jump(Bits<7, true>, Bits<6, false>),
 
+	/// The capture instruction.
+	///
+	/// Fields:
+	/// 0. Output target 1.
+	/// 0. Output target 2.
+	Capture(Bits<5, false>, Bits<5, false>),
+
+	/// The duplicate instruction.
+	///
+	/// Fields:
+	/// 0. Output target 1.
+	/// 0. Output target 2.
+	/// 0. Whether a third duplicate should be sent to the next instruction.
+	Duplicate(Bits<5, false>, Bits<5, false>, bool),
+
 	/// The echo instruction.
 	///
 	/// Fields:

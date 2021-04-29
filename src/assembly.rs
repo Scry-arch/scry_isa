@@ -428,8 +428,22 @@ map_mnemonics! {
 	"ret"(Call(CallVariant::Ret, loc)) = {
 		loc = Offset<6,false>
 	}
-	"echo"
-	(Echo(tar1,tar2,next)) = {
+	"cap" (Capture(tar1,tar2)) = {
+		(tar1,tar2) <= CommaBetween<
+			ReferenceParser<5>,
+			ReferenceParser<5>,
+		> => (*tar1,*tar2)
+	}
+	"dup" (Duplicate(tar1,tar2,next)) = {
+		(tar1,(tar2,next)) <= CommaBetween<
+			ReferenceParser<5>,
+			Then<
+				ReferenceParser<5>,
+				BoolFlag<Then<Comma, Alone<Arrow>>>
+			>,
+		> => (*tar1,(*tar2,*next))
+	}
+	"echo" (Echo(tar1,tar2,next)) = {
 		(tar1,(tar2,next)) <= CommaBetween<
 			ReferenceParser<5>,
 			Then<

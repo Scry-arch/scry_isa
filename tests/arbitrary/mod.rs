@@ -53,6 +53,15 @@ impl Arbitrary for Arb<Instruction>
 			3 => EchoLong(Arb::arb_inner(g)),
 			4 => Alu(Arb::arb_inner(g), Arb::arb_inner(g)),
 			5 => Alu2(Arb::arb_inner(g), Arb::arb_inner(g), Arb::arb_inner(g)),
+			6 =>
+			{
+				Duplicate(
+					Arb::arb_inner(g),
+					Arb::arb_inner(g),
+					Arbitrary::arbitrary(g),
+				)
+			},
+			7 => Capture(Arb::arb_inner(g), Arb::arb_inner(g)),
 			x => panic!("Unsupported: {}", x),
 		})
 	}
@@ -200,7 +209,7 @@ fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Jump(..) => [1, 2].iter(),
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
-		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) => [].iter(),
+		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -236,7 +245,10 @@ fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 	use Instruction::*;
 	match instr
 	{
-		Echo(first, second, _) => vec![(1, first.value()), (2, second.value())],
+		Echo(first, second, _) | Duplicate(first, second, _) | Capture(first, second) =>
+		{
+			vec![(1, first.value()), (2, second.value())]
+		},
 		EchoLong(b) => vec![(1, b.value())],
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
