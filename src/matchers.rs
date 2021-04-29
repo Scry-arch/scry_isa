@@ -297,7 +297,7 @@ impl<'a> Parser<'a> for Symbol
 			.and_then(|t| {
 				let sym = t
 					.splitn(2, |c: char| {
-						!(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+						!(c.is_ascii_alphanumeric() || c == '_' || c == '.')
 					})
 					.next()
 					.unwrap();
@@ -344,11 +344,10 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 				.map(|(value, consumed, bytes)| (value as i32, consumed, bytes))
 		}
 		.or_else(|_| {
-			Symbol::parse(tokens, f)
-				.map(|(symbol, consumed, bytes)| {
-					let difference = f(None, symbol) / 2;
-					(difference - ((difference>0) as i32), consumed, bytes)
-				})
+			Symbol::parse(tokens, f).map(|(symbol, consumed, bytes)| {
+				let difference = f(None, symbol) / 2;
+				(difference - ((difference > 0) as i32), consumed, bytes)
+			})
 		})
 		.and_then(|(value, consumed, bytes)| {
 			Bits::<SIZE, SIGNED>::new(value).map_or_else(
@@ -479,18 +478,24 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 						.map(|b| (b, consumed, bytes))
 				})
 			})
-			.or_else(|err|{
-				Arrow::parse(tokens.clone(), f).and_then(|(_, consumed, bytes)|{
-					Bits::new(0)
-						.ok_or(ParseError {
-							start_token: 0,
-							start_idx: 0,
-							end_token: consumed,
-							end_idx: bytes,
-							err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!())),
-						})
-						.map(|b| (b, consumed, bytes))
-				}).map_err(|_|err)
+			.or_else(|err| {
+				Arrow::parse(tokens.clone(), f)
+					.and_then(|(_, consumed, bytes)| {
+						Bits::new(0)
+							.ok_or(ParseError {
+								start_token: 0,
+								start_idx: 0,
+								end_token: consumed,
+								end_idx: bytes,
+								err_type: ParseErrorType::InternalError(concat!(
+									file!(),
+									':',
+									line!()
+								)),
+							})
+							.map(|b| (b, consumed, bytes))
+					})
+					.map_err(|_| err)
 			})
 	}
 

@@ -1,9 +1,6 @@
 use scry_isa::{Instruction, ParseError, Parser};
 
 /// Parses the given string into an instruction.
-///
-/// If parsing fails, returns the index of the token that caused the failure.
-/// 0-indexed. Tokens are whitespace-delimited
 fn parse_assembly<'a>(
 	asm: &'a str,
 	f: &impl Fn(Option<&str>, &str) -> i32,
@@ -13,11 +10,26 @@ fn parse_assembly<'a>(
 	Instruction::parse(tokens.iter().cloned(), f).map(|(instr, ..)| instr)
 }
 
-/// Tests the parsing of specific instruction.
+/// Tests that the given source assembly string parses (using the given
+/// resolver) into an instruction that then prints into the expected assembly
+/// string.
+fn test_case<'a>(
+	source_asm: &str,
+	expected_asm: &str,
+	resolver: &impl Fn(Option<&str>, &str) -> i32,
+)
+{
+	let instr = parse_assembly(source_asm, resolver)
+		.unwrap_or_else(|err| panic!("Failed to parse '{}': '{:?}'", source_asm, err));
+	let mut buff = String::new();
+	Instruction::print(&instr, &mut buff).unwrap();
+	assert_eq!(buff, expected_asm, "From: \"{}\"", source_asm);
+}
+
+/// Tests the parsing of specific assembly instruction.
 ///
 /// An instruction is given in a string optionally followed by "=>" and another
 /// string.
-///
 /// If the string is alone (no "=>" etc) then it is parsed and printed.
 /// It then checks whether the original and printed string are identical.
 ///
@@ -26,6 +38,11 @@ fn parse_assembly<'a>(
 /// second given string. This is used to check the alternate assembly forms of
 /// an instruction. The first string is therefore the alternate form and the
 /// second is the default one.
+///
+/// The instruction can also be preceded by a parenthesis group containing first
+/// an integer representing the address of the instruction, then any number of
+/// 'symbol:address' pairs representing the addresses of symbols in the
+/// instruction.
 macro_rules! test_assembly {
 	(
 		$(
@@ -46,7 +63,7 @@ macro_rules! test_assembly {
 						addresses.insert(stringify!($id1), $addr1);
 					)+
 				)?
-				let instr = parse_assembly($asm, &|start, end|{
+				test_case($asm, test_assembly!{@prioritize $asm $($asm2)?}, &|start, end|{
 					$(	return
 						(	addresses[end] -
 							if let Some(start) = start {
@@ -57,12 +74,7 @@ macro_rules! test_assembly {
 						);
 					)?
 					panic!("No symbols given.");
-				}).unwrap_or_else(|err|
-					panic!("Failed to parse '{}': '{:?}'", $asm, err)
-				);
-				let mut buff = String::new();
-				Instruction::print(&instr, &mut buff).unwrap();
-				assert_eq!(test_assembly!{@prioritize $asm $($asm2)?}, buff);
+				});
 			)*
 		}
 	};

@@ -1,6 +1,4 @@
 use duplicate::duplicate_inline;
-use quickcheck::{Arbitrary, Gen};
-use rand::Rng;
 use std::{
 	convert::TryFrom,
 	ops::{BitAnd, BitXor},
@@ -130,16 +128,6 @@ impl<
 	}
 }
 
-impl<const N: u32, const SIGNED: bool> Arbitrary for Bits<N, SIGNED>
-{
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
-	{
-		Bits {
-			value: g.gen_range(Self::min().value, Self::max().value),
-		}
-	}
-}
-
 duplicate_inline! {
 	[
 		name 					variants;
@@ -153,14 +141,11 @@ duplicate_inline! {
 	pub enum name {
 		variants
 	}
-
-	impl Arbitrary for name
-	{
-		fn arbitrary<G: Gen>(g: &mut G) -> Self {
+	impl name {
+		pub const ALL_VARIANTS: &'static [Self] = {
 			use name::*;
-			use rand::seq::SliceRandom;
-			[variants].choose(g).unwrap().clone()
-		}
+			&[variants]
+		};
 	}
 }
 
@@ -208,36 +193,4 @@ pub enum Instruction
 	/// 0. The variant.
 	/// 0. The branch location offset.
 	Call(CallVariant, Bits<6, false>),
-}
-
-impl Arbitrary for Instruction
-{
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
-	{
-		use Instruction::*;
-		match g.gen_range(0, Instruction::VARIANT_COUNT)
-		{
-			0 => Jump(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			1 => Call(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			2 =>
-			{
-				Echo(
-					Arbitrary::arbitrary(g),
-					Arbitrary::arbitrary(g),
-					Arbitrary::arbitrary(g),
-				)
-			},
-			3 => EchoLong(Arbitrary::arbitrary(g)),
-			4 => Alu(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			5 =>
-			{
-				Alu2(
-					Arbitrary::arbitrary(g),
-					Arbitrary::arbitrary(g),
-					Arbitrary::arbitrary(g),
-				)
-			},
-			x => panic!("Unsupported: {}", x),
-		}
-	}
 }

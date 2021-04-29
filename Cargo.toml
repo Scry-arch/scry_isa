@@ -7,7 +7,9 @@ edition = "2018"
 [dependencies]
 duplicate="0.2"
 lazy_static = "1.4"
+variant_count="=1.1.0"
+
+[dev-dependencies]
 quickcheck="0.9"
 quickcheck_macros = "0.9"
 rand="0.7"
-variant_count="=1.1.0"
