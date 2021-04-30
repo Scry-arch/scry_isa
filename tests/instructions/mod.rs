@@ -101,4 +101,5 @@ mod dup;
 mod echo;
 mod jmp;
 mod load;
+mod pick;
 mod ret;

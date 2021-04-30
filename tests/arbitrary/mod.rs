@@ -27,9 +27,14 @@ impl<const N: u32, const SIGNED: bool> Arbitrary for Arb<Bits<N, SIGNED>>
 		Self(Bits {
 			value: g.gen_range(
 				Bits::<N, SIGNED>::min().value,
-				Bits::<N, SIGNED>::max().value,
+				Bits::<N, SIGNED>::max().value + 1,
 			),
 		})
+	}
+
+	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
+	{
+		Box::new(self.0.value.shrink().map(|v| Self(Bits::new(v).unwrap())))
 	}
 }
 
@@ -62,7 +67,29 @@ impl Arbitrary for Arb<Instruction>
 				)
 			},
 			7 => Capture(Arb::arb_inner(g), Arb::arb_inner(g)),
-			x => panic!("Unsupported: {}", x),
+			8 =>
+			{
+				Pick(
+					if g.gen_bool(0.5)
+					{
+						Some(Arb::arb_inner(g))
+					}
+					else
+					{
+						None
+					},
+					Arb::arb_inner(g),
+				)
+			},
+			9 =>
+			{
+				Load(
+					Arbitrary::arbitrary(g),
+					Arb::arb_inner(g),
+					Arb::arb_inner(g),
+				)
+			},
+			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		})
 	}
 }
@@ -209,7 +236,8 @@ fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Jump(..) => [1, 2].iter(),
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
-		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) => [].iter(),
+		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
+		| Load(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -250,10 +278,11 @@ fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 			vec![(1, first.value()), (2, second.value())]
 		},
 		EchoLong(b) => vec![(1, b.value())],
+		Pick(imm, b) => vec![(1 + (imm.is_some() as usize), b.value())],
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..) | Call(..) => vec![],
+		Jump(..) | Call(..) | Load(..) => vec![],
 	}
 	.into_iter()
 }

@@ -264,6 +264,40 @@ impl<'a> Parser<'a> for i32
 	}
 }
 
+impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
+{
+	type Internal = Self;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<F>(
+		tokens: impl Iterator<Item = &'a str> + Clone,
+		f: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		i32::parse(tokens, f).and_then(|(value, consumed, bytes)| {
+			Self::new(value).map_or(
+				Err(ParseError {
+					start_token: 0,
+					start_idx: 0,
+					end_token: consumed,
+					end_idx: bytes,
+					err_type: ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
+				}),
+				|b| Ok((b, consumed, bytes)),
+			)
+		})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		i32::print(&internal.value, out)
+	}
+}
+
 pub struct Symbol();
 impl<'a> Parser<'a> for Symbol
 {
@@ -334,35 +368,27 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	where
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		if SIGNED
-		{
-			i32::parse(tokens.clone(), f)
-		}
-		else
-		{
-			u16::parse(tokens.clone(), f)
-				.map(|(value, consumed, bytes)| (value as i32, consumed, bytes))
-		}
-		.or_else(|_| {
-			Symbol::parse(tokens, f).map(|(symbol, consumed, bytes)| {
-				let difference = f(None, symbol) / 2;
-				(difference - ((difference > 0) as i32), consumed, bytes)
+		i32::parse(tokens.clone(), f)
+			.or_else(|_| {
+				Symbol::parse(tokens, f).map(|(symbol, consumed, bytes)| {
+					let difference = f(None, symbol) / 2;
+					(difference - ((difference > 0) as i32), consumed, bytes)
+				})
 			})
-		})
-		.and_then(|(value, consumed, bytes)| {
-			Bits::<SIZE, SIGNED>::new(value).map_or_else(
-				|| {
-					Err(ParseError {
-						start_token: 0,
-						start_idx: 0,
-						end_token: consumed,
-						end_idx: bytes,
-						err_type: ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
-					})
-				},
-				|b| Ok((b, consumed, bytes)),
-			)
-		})
+			.and_then(|(value, consumed, bytes)| {
+				Bits::<SIZE, SIGNED>::new(value).map_or_else(
+					|| {
+						Err(ParseError {
+							start_token: 0,
+							start_idx: 0,
+							end_token: consumed,
+							end_idx: bytes,
+							err_type: ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
+						})
+					},
+					|b| Ok((b, consumed, bytes)),
+				)
+			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
@@ -582,6 +608,16 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 		}
 	}
 
+	fn print_with_whitespace(
+		internal: &Self::Internal,
+		prev_alone: bool,
+		out: &mut impl Write,
+	) -> std::fmt::Result
+	{
+		P1::print_with_whitespace(&internal.0, prev_alone, out)?;
+		P2::print_with_whitespace(&internal.1, P1::ALONE_RIGHT, out)
+	}
+
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
 	{
 		P1::print(&internal.0, out)?;
@@ -791,6 +827,22 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a, P>
 		}
 	}
 
+	fn print_with_whitespace(
+		internal: &Self::Internal,
+		prev_alone: bool,
+		out: &mut impl std::fmt::Write,
+	) -> std::fmt::Result
+	{
+		if let Some(_) = internal
+		{
+			if prev_alone && Self::ALONE_LEFT
+			{
+				out.write_char(' ')?;
+			}
+		}
+		Self::print(internal, out)
+	}
+
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
 		if let Some(internal) = internal
@@ -932,6 +984,22 @@ impl From<&Alu2OutputVariant> for (bool, Option<(bool, bool)>)
 		}
 	}
 }
+impl<const SIZE: u32, const SIGNED: bool> TryFrom<(Bits<SIZE, SIGNED>, ())> for Bits<SIZE, SIGNED>
+{
+	type Error = ();
+
+	fn try_from(value: (Bits<SIZE, SIGNED>, ())) -> Result<Self, Self::Error>
+	{
+		Ok(value.0)
+	}
+}
+impl<const SIZE: u32, const SIGNED: bool> From<&Bits<SIZE, SIGNED>> for (Bits<SIZE, SIGNED>, ())
+{
+	fn from(b: &Bits<SIZE, SIGNED>) -> Self
+	{
+		(b.clone(), ())
+	}
+}
 
 pub struct Flatten<'a, P: 'a + Parser<'a>, T>(PhantomData<&'a (P, T)>)
 where
@@ -1044,5 +1112,194 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	fn print(&(off1, off2): &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
 		CommaBetween::<Offset<7, true>, Offset<6, false>>::print(&(off1, off2), out)
+	}
+}
+
+pub struct Pow2<'a, const SIZE: u32>(PhantomData<&'a ()>);
+impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
+{
+	type Internal = Bits<SIZE, false>;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<F>(
+		mut tokens: impl Iterator<Item = &'a str> + Clone,
+		_: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		tokens
+			.next()
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+			.and_then(|token| {
+				let value_str = token
+					.split_at(
+						token
+							.find(|c: char| !c.is_ascii_digit())
+							.unwrap_or(token.len()),
+					)
+					.0;
+				let value_error = Err(ParseError {
+					start_token: 0,
+					start_idx: 0,
+					end_token: 0,
+					end_idx: value_str.len(),
+					err_type: ParseErrorType::UnexpectedChars("a power of 2"),
+				});
+				value_str
+					.parse::<u16>()
+					.map_or(value_error.clone(), |value| {
+						if value.count_ones() == 1
+						{
+							let mut pow = 0;
+							let mut v = value >> 1;
+							while v != 0
+							{
+								v >>= 1;
+								pow += 1;
+							}
+							Bits::new(pow)
+								.ok_or(ParseError::from_token(
+									value_str,
+									0,
+									ParseErrorType::from_bits::<SIZE, false>(pow as isize),
+								))
+								.map(|b| (b, 0, value_str.len()))
+						}
+						else
+						{
+							value_error
+						}
+					})
+			})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		let value = 1 << internal.value;
+		out.write_fmt(format_args!("{}", value))
+	}
+}
+
+pub struct IntSize<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for IntSize<'a>
+{
+	type Internal = (bool, Bits<3, false>);
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<F>(
+		mut tokens: impl Iterator<Item = &'a str> + Clone,
+		f: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		tokens
+			.next()
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+			.and_then(|token| {
+				if token.starts_with('i')
+				{
+					Ok(true)
+				}
+				else if token.starts_with('u')
+				{
+					Ok(false)
+				}
+				else
+				{
+					Err(ParseError::from_token(
+						token,
+						0,
+						ParseErrorType::UnexpectedChars("integer scalar size"),
+					))
+				}
+				.and_then(|signed| {
+					Pow2::<3>::parse(Some(&token[1..]).into_iter(), f)
+						.map_err(|mut err| {
+							err.start_idx += 1;
+							err
+						})
+						.map(|(b, _, bytes)| ((signed, b), 0, bytes + 1))
+				})
+			})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		out.write_char(if internal.0 { 'i' } else { 'u' })?;
+		Pow2::print(&internal.1, out)
+	}
+}
+
+pub struct VecLength<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for VecLength<'a>
+{
+	type Internal = Bits<3, false>;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<F>(
+		mut tokens: impl Iterator<Item = &'a str> + Clone,
+		f: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		Pow2::<3>::parse(tokens.clone(), f)
+			.and_then(|(value, consumed, bytes)| {
+				if value.is_max()
+				{
+					Err(ParseError {
+						start_token: 0,
+						start_idx: 0,
+						end_token: consumed,
+						end_idx: bytes,
+						err_type: ParseErrorType::OutOfBoundValue(value.value as isize, 0, 6),
+					})
+				}
+				else
+				{
+					Ok((value, consumed, bytes))
+				}
+			})
+			.or_else(|_| {
+				tokens
+					.next()
+					.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+					.and_then(|t| {
+						if t.starts_with('_')
+						{
+							Ok((Bits::max(), 0, 1))
+						}
+						else
+						{
+							Err(ParseError::from_token(
+								t,
+								0,
+								ParseErrorType::UnexpectedChars(
+									"vector length as '_' or a power of 2",
+								),
+							))
+						}
+					})
+			})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		if internal.is_max()
+		{
+			out.write_char('_')
+		}
+		else
+		{
+			Pow2::print(internal, out)
+		}
 	}
 }

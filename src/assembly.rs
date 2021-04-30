@@ -400,12 +400,11 @@ macro_rules! map_mnemonics_impl {
                 use Instruction::*;
 
                 out.write_str(Instruction::mnemonic(internal))?;
-                out.write_str(" ")?;
 
                 match internal {
                     $(
                         $(
-                            $($instr)* => {<$parser_type>::print(& $print_as, out )}
+                            $($instr)* => {<$parser_type>::print_with_whitespace(& $print_as,true, out)}
                         )+
                     )*
                 }
@@ -486,5 +485,18 @@ map_mnemonics! {
 			ReferenceParser<5>
 		> => (*output, *target)
 	}
-
+	"pick" (Pick(imm, target)) = {
+		(imm, target) <= Then<
+			Maybe<
+				Flatten<Then<Bits<5, false>, Comma>,_>
+			>,
+			ReferenceParser<5>
+		> => (*imm, *target)
+	}
+	"ld" (Load(signed, size, len)) = {
+		((signed, size), len) <= CommaBetween<
+			IntSize,
+			VecLength
+		> => ((*signed, *size), *len)
+	}
 }

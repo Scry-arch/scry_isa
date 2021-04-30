@@ -31,6 +31,9 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 		self.value
 	}
 
+	/// All bits set to 1.
+	///
+	/// For unsigned, equivalent to `max()`.
 	pub fn saturated() -> Self
 	{
 		Self {
@@ -38,11 +41,13 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 		}
 	}
 
+	/// All bits set to 0.
 	pub fn cleared() -> Self
 	{
 		Self { value: 0 }
 	}
 
+	/// The highest integer value.
 	pub fn max() -> Self
 	{
 		Self {
@@ -50,6 +55,7 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 		}
 	}
 
+	/// The lowest integer value.
 	pub fn min() -> Self
 	{
 		Self {
@@ -64,6 +70,18 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 				}
 			},
 		}
+	}
+
+	/// Whether it is the highest value.
+	pub fn is_max(&self) -> bool
+	{
+		self.value == Self::max().value
+	}
+
+	/// Whether it is the lowest value.
+	pub fn is_min(&self) -> bool
+	{
+		self.value == Self::min().value
 	}
 }
 
@@ -208,4 +226,22 @@ pub enum Instruction
 	/// 0. The variant.
 	/// 0. The branch location offset.
 	Call(CallVariant, Bits<6, false>),
+
+	/// The pick and pick-immediate instructions.
+	///
+	/// Fields:
+	/// 0. Optional immediate value for the pick condition. In `Some(..)`, this
+	/// instruction 	is of the immediate variant.
+	/// 0. Output target.
+	Pick(Option<Bits<5, false>>, Bits<5, false>),
+
+	/// The integer load instruction.
+	///
+	/// Fields:
+	/// 0. Whether the loaded integer is signed or unsigned. `true` is signed.
+	/// 0. The scalar size to load as a power of two. I.e. 0 loads 1 byte, 1
+	/// loads 2 bytes, 2 loads 4 bytes, etc. 0. The vector length to load as a
+	/// power of two. I.e. 0 loads 1 integer, 1 loads 2 integers 	2 loads 4
+	/// integers etc. If 7, loads the native vector length for that integer.
+	Load(bool, Bits<3, false>, Bits<3, false>),
 }

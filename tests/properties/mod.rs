@@ -51,7 +51,7 @@ fn print_then_parse(Arb(instr): Arb<Instruction>) -> bool
 fn parse_assembly(assembly: AssemblyInstruction) -> bool
 {
 	let (tokens, resolver) = assembly.tokens_and_resolver();
-	Instruction::parse(tokens.clone().split_ascii_whitespace(), &resolver)
+	Instruction::parse(tokens.split_ascii_whitespace(), &resolver)
 		.map_or(false, |(parsed_instr, ..)| assembly.0 == parsed_instr)
 }
 
