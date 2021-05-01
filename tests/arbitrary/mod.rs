@@ -89,6 +89,8 @@ impl Arbitrary for Arb<Instruction>
 					Arb::arb_inner(g),
 				)
 			},
+			10 => Store,
+			11 => Value(Arb::arb_inner(g)),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		})
 	}
@@ -237,7 +239,7 @@ fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
-		| Load(..) => [].iter(),
+		| Load(..) | Store | Value(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -282,7 +284,7 @@ fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..) | Call(..) | Load(..) => vec![],
+		Jump(..) | Call(..) | Load(..) | Store | Value(..) => vec![],
 	}
 	.into_iter()
 }

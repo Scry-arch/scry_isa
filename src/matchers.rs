@@ -1,8 +1,6 @@
-use crate::{
-	instructions::{Alu2OutputVariant, Bits},
-	ParseErrorType::OutOfBoundValue,
-};
+use crate::{instructions::{Alu2OutputVariant, Bits}, ParseErrorType::OutOfBoundValue, Permutation};
 use duplicate::duplicate_inline;
+use lazy_static::lazy_static;
 use std::{
 	convert::{TryFrom, TryInto},
 	fmt::Write,
@@ -16,10 +14,10 @@ pub enum ParseErrorType<'a>
 	/// Couldn't resolve symbol
 	UnkownSymbol,
 
-	/// Invalid use of symbol.
+	/// Invalid inputs.
 	///
 	/// Given is a description of what was expected of the symbol
-	InvalidSymbol(&'a str),
+	Invalid(&'a str),
 
 	/// Invalid number value.
 	///
@@ -167,7 +165,7 @@ pub trait Parser<'a>
 /// Advances the given iterator according to the given consumed and bytes
 /// values. Returns new consumed and bytes values, where if the bytes have
 /// consumed their token, it is reflected in the consumed (which is then 1
-/// higher) and the bytes are set to 0. lasty, returns the iterator advanced to
+/// higher) and the bytes are set to 0. Lastly, returns the iterator advanced to
 /// the token/bytes after the consumed.
 ///
 /// Returns: (consumed, bytes, tokens)
@@ -188,6 +186,34 @@ fn advance_iterator<'a>(
 		bytes * (!consumed_last as usize), // Set to zero if bytes consumed last token.
 		first_next.into_iter().chain(tokens),
 	)
+}
+
+impl<'a> Parser<'a> for ()
+{
+	type Internal = ();
+
+	const ALONE_LEFT: bool = false;
+	const ALONE_RIGHT: bool = false;
+
+	fn parse<F>(
+		_: impl Iterator<Item = &'a str> + Clone,
+		_: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		Ok(((), 0, 0))
+	}
+
+	fn print_with_whitespace(_: &Self::Internal, _: bool, _: &mut impl Write) -> std::fmt::Result
+	{
+		Ok(())
+	}
+
+	fn print(_: &Self::Internal, _: &mut impl Write) -> std::fmt::Result
+	{
+		Ok(())
+	}
 }
 
 impl<'a> Parser<'a> for u16
@@ -436,7 +462,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								start_idx: 2 * ((consumed == 0) as usize),
 								end_token: consumed,
 								end_idx: (2 * ((consumed == 0) as usize)) + sym1.len(),
-								err_type: ParseErrorType::InvalidSymbol(
+								err_type: ParseErrorType::Invalid(
 									"must be at or follow the instruction",
 								),
 							})
@@ -474,7 +500,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 										start_idx: bytes * ((consumed2 == 0) as usize),
 										end_token: next_consumed,
 										end_idx: sym.len() + (bytes * ((consumed2 == 0) as usize)),
-										err_type: ParseErrorType::InvalidSymbol(
+										err_type: ParseErrorType::Invalid(
 											"must refer to an address higher than the previous \
 											 label in the chain",
 										),
@@ -1301,5 +1327,120 @@ impl<'a> Parser<'a> for VecLength<'a>
 		{
 			Pow2::print(internal, out)
 		}
+	}
+}
+
+pub struct ValueAlias<'a>(PhantomData<&'a ()>);
+impl<'a> ValueAlias<'a>
+{
+	fn value_alias(v: &Bits<8, false>) -> Option<&str>
+	{
+		lazy_static! {
+			static ref ALIASES: Vec<&'static str> = vec!["MAX_VEC_SIZE", "MAX_VEC_ALIGN_MASK",];
+		}
+		ALIASES.get(v.value as usize).map(|s| *s)
+	}
+}
+impl<'a> Parser<'a> for ValueAlias<'a>
+{
+	type Internal = Bits<8, false>;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<F>(
+		mut tokens: impl Iterator<Item = &'a str> + Clone,
+		_: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		tokens
+			.next()
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+			.and_then(|t| {
+				duplicate_inline! {
+					[
+						text 					value;
+						["MAX_VEC_SIZE"] 		[0];
+						["MAX_VEC_ALIGN_MASK"] 	[1];
+					]
+					if t.starts_with(text) {
+						return Ok((Bits::new(value).unwrap(), 0, text.len()))
+					}
+				}
+				Err(ParseError::from_token(
+					t,
+					0,
+					ParseErrorType::UnexpectedChars("a value alias or integer"),
+				))
+			})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		if let Some(alias) = Self::value_alias(internal)
+		{
+			out.write_str(alias)
+		}
+		else
+		{
+			Bits::print(internal, out)
+		}
+	}
+}
+
+pub struct Perm<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for Perm<'a>
+{
+	type Internal = Permutation;
+	
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+	
+	fn parse<F>(
+		tokens: impl Iterator<Item = &'a str> + Clone,
+		f: &F,
+	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+		where
+			F: Fn(Option<&str>, &str) -> i32,
+	{
+		let mut perm: Vec<u8> = Vec::new();
+		let mut consumed = 0;
+		let mut bytes = 0;
+		let (_, _, mut next_tokens) =
+			advance_iterator(tokens.clone(), consumed, bytes);
+		
+		while let Ok((v, c, b)) = Then::<u16, Comma>::parse(next_tokens, f)
+			.map(|((val, _), c, b)| (val, c, b))
+		{
+			perm.push(v as u8);
+			consumed += c + (((bytes>0) && (c>0)) as usize);
+			bytes = b + ((c==0) as usize * bytes);
+			let (c,b,t) = advance_iterator(tokens.clone(), consumed, bytes);
+			next_tokens = t;
+			consumed = c;
+			bytes = b;
+		}
+		
+		if let Ok(perm) = Permutation::try_from(dbg!(perm.as_slice())){
+			Ok((dbg!(perm), consumed, bytes))
+		} else {
+			Err(ParseError{
+				start_token: 0,
+				start_idx: 0,
+				end_token: consumed,
+				end_idx: bytes,
+				err_type: ParseErrorType::Invalid("a permutation of 4 element")
+			})
+		}
+		
+	}
+	
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		let perm = internal.get_permutation();
+		
+		out.write_fmt(format_args!("{}, {}, {}, {},", perm[0], perm[1], perm[2], perm[3]))
 	}
 }

@@ -389,7 +389,10 @@ macro_rules! map_mnemonics_impl {
                                     * mnemonic.len()),
                             err_type: err.err_type
                         }),
-                        |(instr, consumed, bytes)| Ok((instr, consumed+(consumed_first as usize), bytes + (mnemonic.len()*(!consumed_first as usize)))))
+                        |(instr, consumed, bytes)| Ok((
+                            instr, consumed+((consumed_first && bytes != 0) as usize),
+                            bytes + (mnemonic.len()*(!(consumed_first && bytes != 0) as usize)))
+                        ))
                 }else {
                     Err(ParseError::from_token(first_token, 0, ParseErrorType::UnexpectedChars("instruction mnemonic")))
                 }
@@ -498,5 +501,15 @@ map_mnemonics! {
 			IntSize,
 			VecLength
 		> => ((*signed, *size), *len)
+	}
+	"st" (Store) = {
+		() <= () => ()
+	}
+	"val" (Value(v)) = {
+		v <= Or<
+			ValueAlias,
+			Bits<8, false>,
+			_
+		> => (*v)
 	}
 }

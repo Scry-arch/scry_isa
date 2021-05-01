@@ -103,3 +103,5 @@ mod jmp;
 mod load;
 mod pick;
 mod ret;
+mod store;
+mod val;

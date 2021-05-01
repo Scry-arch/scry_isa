@@ -244,4 +244,10 @@ pub enum Instruction
 	/// power of two. I.e. 0 loads 1 integer, 1 loads 2 integers 	2 loads 4
 	/// integers etc. If 7, loads the native vector length for that integer.
 	Load(bool, Bits<3, false>, Bits<3, false>),
+
+	/// The store instruction.
+	Store,
+
+	/// The value instruction.
+	Value(Bits<8, false>),
 }

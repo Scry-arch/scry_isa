@@ -84,6 +84,7 @@ fn error_only_in_instruction(
 	buffer.push_str(postfix.as_str());
 	let injected_symbol = Cell::new(false);
 	let tokens = buffer.split_ascii_whitespace().into_iter();
+
 	Instruction::parse(tokens.clone(), &mut |start, end| {
 		if let Some(start) = start
 		{
@@ -103,7 +104,10 @@ fn error_only_in_instruction(
 				TestResult::from_bool(
 					err.start_token < instr_token_count
 						&& err.end_token < instr_token_count
-						&& err.start_idx < tokens.clone().nth(err.start_token).unwrap().len()
+						// We allow the start_idx to be equal to the length of the token,
+						// so that the error message can indicate an error for missing characters
+						// that were expected in the same token.
+						&& err.start_idx <=tokens.clone().nth(err.start_token).unwrap().len()
 						&& err.end_idx <= tokens.clone().nth(err.end_token).unwrap().len(),
 				)
 			}
