@@ -14,6 +14,13 @@ pub struct Bits<const N: u32, const SIGNED: bool>
 
 impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 {
+	pub const SIZE: u32 = N;
+
+	pub fn size(self) -> u32
+	{
+		Self::SIZE
+	}
+
 	pub fn new(value: i32) -> Option<Self>
 	{
 		if Self::max().value() >= value && Self::min().value() <= value
@@ -82,6 +89,89 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 	pub fn is_min(&self) -> bool
 	{
 		self.value == Self::min().value
+	}
+}
+
+impl<const N: u32> From<Bits<N, false>> for Bits<N, true>
+{
+	fn from(x: Bits<N, false>) -> Self
+	{
+		// Reinterpret the bits as signed
+		if x.value > Self::max().value
+		{
+			let remainder = x.value - Self::max().value - 1;
+			Self::new(Self::min().value + remainder).unwrap()
+		}
+		else
+		{
+			Self::new(x.value).unwrap()
+		}
+	}
+}
+impl<const N: u32> From<Bits<N, true>> for Bits<N, false>
+{
+	fn from(x: Bits<N, true>) -> Self
+	{
+		// Reinterpret the bits as signed
+		if x.value < 0
+		{
+			let remainder = (-Bits::<N, true>::min().value) + x.value + 1;
+			Self::new(Bits::<N, true>::max().value + remainder).unwrap()
+		}
+		else
+		{
+			Self::new(x.value).unwrap()
+		}
+	}
+}
+
+impl From<Bits<1, false>> for bool
+{
+	fn from(x: Bits<1, false>) -> Self
+	{
+		x.value == 1
+	}
+}
+impl From<bool> for Bits<1, false>
+{
+	fn from(x: bool) -> Self
+	{
+		Self::new(x as i32).unwrap()
+	}
+}
+
+impl From<Bits<3, false>> for Alu2OutputVariant
+{
+	fn from(x: Bits<3, false>) -> Self
+	{
+		use Alu2OutputVariant::*;
+		match x.value
+		{
+			0b001 => High,
+			0b010 => Low,
+			0b011 => FirstLow,
+			0b100 => FirstHigh,
+			0b101 => NextHigh,
+			0b110 => NextLow,
+			_ => panic!("Invalid Alu2OutputVariant"),
+		}
+	}
+}
+impl From<Alu2OutputVariant> for Bits<3, false>
+{
+	fn from(x: Alu2OutputVariant) -> Self
+	{
+		use Alu2OutputVariant::*;
+		Self::new(match x
+		{
+			High => 0b001,
+			Low => 0b010,
+			FirstLow => 0b011,
+			FirstHigh => 0b100,
+			NextHigh => 0b101,
+			NextLow => 0b110,
+		})
+		.unwrap()
 	}
 }
 
@@ -167,10 +257,33 @@ duplicate_inline! {
 	}
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, VariantCount)]
+pub enum InstructionFormat
+{
+	/// The NEXT format (i.e. a single ouput to next instruction).
+	/// The boolean is whether its the load-stack instruction.
+	Next(bool),
+
+	/// The NOON format (i.e. none or 1 output
+	/// The bist are the offset of the output
+	Noon(Bits<5, false>),
+
+	/// the ALU format
+	Alu,
+
+	/// The DOUB format (two outputs with options
+	Doub(Bits<5, false>, Bits<5, false>),
+}
+
 /// All instructions
 #[derive(Debug, Clone, Eq, PartialEq, VariantCount)]
 pub enum Instruction
 {
+	/// An invalid instruction.
+	///
+	/// Field 0 is the value of the instruction
+	Invalid(u16),
+
 	/// The jump instruction.
 	///
 	/// Fields:
@@ -191,7 +304,7 @@ pub enum Instruction
 	/// 0. Output target 1.
 	/// 0. Output target 2.
 	/// 0. Whether a third duplicate should be sent to the next instruction.
-	Duplicate(Bits<5, false>, Bits<5, false>, bool),
+	Duplicate(bool, Bits<5, false>, Bits<5, false>),
 
 	/// The echo instruction.
 	///
@@ -200,7 +313,7 @@ pub enum Instruction
 	/// 0. Output target 2.
 	/// 0. Whether the remaining inputs should be output to the the next
 	/// instruction.
-	Echo(Bits<5, false>, Bits<5, false>, bool),
+	Echo(bool, Bits<5, false>, Bits<5, false>),
 
 	/// The long echo instruction.
 	///
@@ -227,13 +340,18 @@ pub enum Instruction
 	/// 0. The branch location offset.
 	Call(CallVariant, Bits<6, false>),
 
-	/// The pick and pick-immediate instructions.
+	/// The pick instruction.
 	///
 	/// Fields:
-	/// 0. Optional immediate value for the pick condition. In `Some(..)`, this
-	/// instruction is of the immediate variant.
 	/// 0. Output target.
-	Pick(Option<Bits<5, false>>, Bits<5, false>),
+	Pick(Bits<5, false>),
+
+	/// The pick-immediate instruction.
+	///
+	/// Fields:
+	/// 0. Immediate value for the pick condition.
+	/// 0. Output target.
+	PickI(Bits<6, false>, Bits<5, false>),
 
 	/// The integer load instruction.
 	///

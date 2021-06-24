@@ -1,7 +1,11 @@
-use crate::{instructions::{Alu2OutputVariant, Bits}, ParseErrorType::OutOfBoundValue, Permutation};
+use crate::{
+	instructions::{Alu2OutputVariant, Bits},
+	ParseErrorType::OutOfBoundValue,
+};
 use duplicate::duplicate_inline;
 use lazy_static::lazy_static;
 use std::{
+	borrow::Borrow,
 	convert::{TryFrom, TryInto},
 	fmt::Write,
 	marker::PhantomData,
@@ -139,11 +143,10 @@ pub trait Parser<'a>
 	/// The given iterator must produce tokens of only ASCII characters free of
 	/// whitespace. Effectively, the iterator must behave as if it was produced
 	/// by [`split_ascii_whitespace`](https://doc.rust-lang.org/std/primitive.str.html#method.split_ascii_whitespace)
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32;
 
 	fn print_with_whitespace(
@@ -195,11 +198,10 @@ impl<'a> Parser<'a> for ()
 	const ALONE_LEFT: bool = false;
 	const ALONE_RIGHT: bool = false;
 
-	fn parse<F>(
-		_: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(_: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Ok(((), 0, 0))
@@ -223,11 +225,10 @@ impl<'a> Parser<'a> for u16
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let value_string = tokens.next()
@@ -259,11 +260,10 @@ impl<'a> Parser<'a> for i32
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let value_string = tokens.next()
@@ -297,11 +297,10 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		i32::parse(tokens, f).and_then(|(value, consumed, bytes)| {
@@ -332,11 +331,10 @@ impl<'a> Parser<'a> for Symbol
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let error_type =
@@ -387,16 +385,16 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		i32::parse(tokens.clone(), f)
+		let f = f.borrow();
+		i32::parse::<_, F, _>(tokens.clone(), f)
 			.or_else(|_| {
-				Symbol::parse(tokens, f).map(|(symbol, consumed, bytes)| {
+				Symbol::parse::<_, F, _>(tokens, f).map(|(symbol, consumed, bytes)| {
 					let difference = f(None, symbol) / 2;
 					(difference - ((difference > 0) as i32), consumed, bytes)
 				})
@@ -431,14 +429,14 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		Then::<Arrow, u16>::parse(tokens.clone(), f)
+		let f = f.borrow();
+		Then::<Arrow, u16>::parse::<_, F, _>(tokens.clone(), f)
 			.and_then(|(((), value), consumed, bytes)| {
 				Bits::new(value as i32).map_or_else(
 					|| {
@@ -452,9 +450,9 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 				)
 			})
 			.or_else(|mut err| {
-				let mut result = Then::<Arrow, Symbol>::parse(tokens.clone(), f).and_then(
-					|(((), sym1), consumed, bytes)| {
-						let off1 = (f(None, sym1) / 2) - 1;
+				let mut result = Then::<Arrow, Symbol>::parse::<_, F, _>(tokens.clone(), f)
+					.and_then(|(((), sym1), consumed, bytes)| {
+						let off1 = (f.borrow()(None, sym1) / 2) - 1;
 						if off1 < 0
 						{
 							Err(ParseError {
@@ -471,8 +469,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 						{
 							Ok(((sym1, off1), consumed, bytes))
 						}
-					},
-				);
+					});
 				let mut next_branch_to = true;
 				let mut next_result = result.clone();
 				while let Ok(((sym1, offset), consumed, bytes)) = next_result
@@ -481,7 +478,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 					let (consumed, bytes, tokens) =
 						advance_iterator(tokens.clone(), consumed, bytes);
 
-					next_result = Then::<Arrow, Symbol>::parse(tokens, f).and_then(
+					next_result = Then::<Arrow, Symbol>::parse::<_, F, _>(tokens, f).and_then(
 						|(((), sym), consumed2, bytes2)| {
 							let next_consumed = consumed + consumed2;
 							let next_bytes = bytes2 + (bytes * ((consumed2 == 0) as usize));
@@ -492,7 +489,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 							}
 							else
 							{
-								let next_offset = f(Some(sym1), sym) / 2;
+								let next_offset = f.borrow()(Some(sym1), sym) / 2;
 								if next_offset < 0
 								{
 									Err(ParseError {
@@ -531,7 +528,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 				})
 			})
 			.or_else(|err| {
-				Arrow::parse(tokens.clone(), f)
+				Arrow::parse::<_, F, _>(tokens.clone(), f)
 					.and_then(|(_, consumed, bytes)| {
 						Bits::new(0)
 							.ok_or(ParseError {
@@ -566,11 +563,10 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for CommaBetween<'
 	const ALONE_LEFT: bool = P1::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P2::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Then::<P1, Then<Comma, P2>>::parse(tokens, f)
@@ -593,20 +589,20 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 	const ALONE_LEFT: bool = P1::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P2::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		match P1::parse(tokens.clone(), f)
+		let f = f.borrow();
+		match P1::parse::<_, F, _>(tokens.clone(), f)
 		{
 			Ok((result1, consumed1, bytes1)) =>
 			{
 				let (consumed, bytes, tokens) = advance_iterator(tokens, consumed1, bytes1);
 
-				match P2::parse(tokens, f)
+				match P2::parse::<_, F, _>(tokens, f)
 				{
 					// If P2 didn't consume anything, report the raw consumed/bytes of P1
 					Ok((result2, 0, 0)) => Ok(((result1, result2), consumed1, bytes1)),
@@ -667,14 +663,14 @@ where
 	const ALONE_LEFT: bool = P1::ALONE_LEFT || P2::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P1::ALONE_RIGHT || P2::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		let err1 = match P1::parse(tokens.clone(), f)
+		let f = f.borrow();
+		let err1 = match P1::parse::<_, F, _>(tokens.clone(), f)
 		{
 			Ok((result, consumed, bytes)) =>
 			{
@@ -696,7 +692,7 @@ where
 			Err(err) => err,
 		};
 
-		match P2::parse(tokens, f)
+		match P2::parse::<_, F, _>(tokens, f)
 		{
 			Ok((parsed, consumed, bytes)) =>
 			{
@@ -738,35 +734,34 @@ pub trait HasWord
 	const WORD: &'static str;
 }
 
-pub struct Keyword<I: HasWord>(PhantomData<I>);
-impl<'a, I: HasWord> Parser<'a> for Keyword<I>
+pub struct Keyword<T: HasWord>(PhantomData<T>);
+impl<'a, T: HasWord> Parser<'a> for Keyword<T>
 {
 	type Internal = ();
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		tokens
 			.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
 			.and_then(|t| {
-				if t.starts_with(I::WORD)
+				if t.starts_with(T::WORD)
 				{
-					Ok(((), 0, I::WORD.len()))
+					Ok(((), 0, T::WORD.len()))
 				}
 				else
 				{
 					Err(ParseError::from_token(
 						t,
 						0,
-						ParseErrorType::UnexpectedChars(I::WORD),
+						ParseErrorType::UnexpectedChars(T::WORD),
 					))
 				}
 			})
@@ -774,7 +769,7 @@ impl<'a, I: HasWord> Parser<'a> for Keyword<I>
 
 	fn print(_: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		out.write_str(I::WORD)
+		out.write_str(T::WORD)
 	}
 }
 
@@ -805,11 +800,13 @@ duplicate_inline! {
 		const ALONE_RIGHT: bool = alone_right;
 		const ALONE_LEFT: bool = false;
 
-		fn parse<F>(
-			mut tokens: impl Iterator<Item = &'a str> + Clone,
-			_: &F,
+		fn parse<I,F,B>(
+			mut tokens: I,
+			_: B,
 		) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 		where
+			I: Iterator<Item = &'a str> + Clone,
+			B: Borrow<F>,
 			F: Fn(Option<&str>, &str) -> i32
 		{
 			tokens.next()
@@ -839,11 +836,10 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a, P>
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		match P::parse(tokens, f)
@@ -894,11 +890,10 @@ where
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		match P::parse(tokens, f)
@@ -935,19 +930,18 @@ where
 	const ALONE_LEFT: bool = P1::ALONE_LEFT || P2::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P1::ALONE_RIGHT || P2::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		match P1::parse(tokens.clone(), f)
+		match P1::parse::<_, F, _>(tokens.clone(), f.borrow())
 		{
 			Ok((_, consumed, bytes)) => Ok((true, consumed, bytes)),
 			Err(err1) =>
 			{
-				match P2::parse(tokens, f)
+				match P2::parse::<_, F, _>(tokens, f)
 				{
 					Ok((_, consumed, bytes)) => Ok((false, consumed, bytes)),
 					Err(mut err2) =>
@@ -1041,11 +1035,10 @@ where
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		let (result, consumed, bytes) = P::parse(tokens, f)?;
@@ -1079,11 +1072,10 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Alone<'a, P>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		P::parse(tokens, f)
@@ -1103,14 +1095,14 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		let starts_with_symbol = Symbol::parse(tokens.clone(), &|_, _| 0).is_ok();
+		let starts_with_symbol =
+			Symbol::parse(tokens.clone(), |_: Option<&str>, _: &str| 0).is_ok();
 		let ((off1, off2), consumed, bytes) =
 			CommaBetween::<Offset<8, true>, Offset<6, false>>::parse(tokens, f)?;
 		let value = if starts_with_symbol && off1.value() > 0
@@ -1149,11 +1141,10 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		tokens
@@ -1217,11 +1208,10 @@ impl<'a> Parser<'a> for IntSize<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		tokens
@@ -1270,11 +1260,10 @@ impl<'a> Parser<'a> for VecLength<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Pow2::<3>::parse(tokens.clone(), f)
@@ -1348,11 +1337,10 @@ impl<'a> Parser<'a> for ValueAlias<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<F>(
-		mut tokens: impl Iterator<Item = &'a str> + Clone,
-		_: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
 	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		tokens
@@ -1387,60 +1375,5 @@ impl<'a> Parser<'a> for ValueAlias<'a>
 		{
 			Bits::print(internal, out)
 		}
-	}
-}
-
-pub struct Perm<'a>(PhantomData<&'a ()>);
-impl<'a> Parser<'a> for Perm<'a>
-{
-	type Internal = Permutation;
-	
-	const ALONE_LEFT: bool = true;
-	const ALONE_RIGHT: bool = true;
-	
-	fn parse<F>(
-		tokens: impl Iterator<Item = &'a str> + Clone,
-		f: &F,
-	) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
-		where
-			F: Fn(Option<&str>, &str) -> i32,
-	{
-		let mut perm: Vec<u8> = Vec::new();
-		let mut consumed = 0;
-		let mut bytes = 0;
-		let (_, _, mut next_tokens) =
-			advance_iterator(tokens.clone(), consumed, bytes);
-		
-		while let Ok((v, c, b)) = Then::<u16, Comma>::parse(next_tokens, f)
-			.map(|((val, _), c, b)| (val, c, b))
-		{
-			perm.push(v as u8);
-			consumed += c + (((bytes>0) && (c>0)) as usize);
-			bytes = b + ((c==0) as usize * bytes);
-			let (c,b,t) = advance_iterator(tokens.clone(), consumed, bytes);
-			next_tokens = t;
-			consumed = c;
-			bytes = b;
-		}
-		
-		if let Ok(perm) = Permutation::try_from(dbg!(perm.as_slice())){
-			Ok((dbg!(perm), consumed, bytes))
-		} else {
-			Err(ParseError{
-				start_token: 0,
-				start_idx: 0,
-				end_token: consumed,
-				end_idx: bytes,
-				err_type: ParseErrorType::Invalid("a permutation of 4 element")
-			})
-		}
-		
-	}
-	
-	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
-	{
-		let perm = internal.get_permutation();
-		
-		out.write_fmt(format_args!("{}, {}, {}, {},", perm[0], perm[1], perm[2], perm[3]))
 	}
 }

@@ -19,7 +19,10 @@ fn print_then_parse(Arb(instr): Arb<Instruction>) -> bool
 	}
 	else
 	{
-		match Instruction::parse(buffer.split_ascii_whitespace(), &mut |_, _| unreachable!())
+		match Instruction::parse(
+			buffer.split_ascii_whitespace(),
+			|_: Option<&str>, _: &str| unreachable!(),
+		)
 		{
 			Ok((instr2, ..)) =>
 			{
@@ -51,7 +54,7 @@ fn print_then_parse(Arb(instr): Arb<Instruction>) -> bool
 fn parse_assembly(assembly: AssemblyInstruction) -> bool
 {
 	let (tokens, resolver) = assembly.tokens_and_resolver();
-	Instruction::parse(tokens.split_ascii_whitespace(), &resolver)
+	Instruction::parse(tokens.split_ascii_whitespace(), resolver)
 		.map_or(false, |(parsed_instr, ..)| assembly.0 == parsed_instr)
 }
 
@@ -85,7 +88,7 @@ fn error_only_in_instruction(
 	let injected_symbol = Cell::new(false);
 	let tokens = buffer.split_ascii_whitespace().into_iter();
 
-	Instruction::parse(tokens.clone(), &mut |start, end| {
+	Instruction::parse(tokens.clone(), |start: Option<&str>, end: &str| {
 		if let Some(start) = start
 		{
 			injected_symbol.set(start.contains(inject))
@@ -143,7 +146,7 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 		_ => (),
 	}
 
-	let (_, consumed, bytes) = Instruction::parse(chained, &resolver).unwrap();
+	let (_, consumed, bytes) = Instruction::parse(chained, resolver).unwrap();
 
 	TestResult::from_bool(
 		(consumed == (instr_tokens.len() - 1)) && (bytes == instr_tokens.last().unwrap().len()),
@@ -215,7 +218,7 @@ fn different_separator_tokenization(
 		edited_assembly.push_str(rest);
 
 		TestResult::from_bool(
-			Instruction::parse(edited_assembly.split_ascii_whitespace(), &resolver).is_ok(),
+			Instruction::parse(edited_assembly.split_ascii_whitespace(), resolver).is_ok(),
 		)
 	}
 	else

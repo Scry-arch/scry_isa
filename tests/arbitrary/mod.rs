@@ -50,9 +50,9 @@ impl Arbitrary for Arb<Instruction>
 			2 =>
 			{
 				Echo(
-					Arb::arb_inner(g),
-					Arb::arb_inner(g),
 					Arbitrary::arbitrary(g),
+					Arb::arb_inner(g),
+					Arb::arb_inner(g),
 				)
 			},
 			3 => EchoLong(Arb::arb_inner(g)),
@@ -61,35 +61,18 @@ impl Arbitrary for Arb<Instruction>
 			6 =>
 			{
 				Duplicate(
-					Arb::arb_inner(g),
-					Arb::arb_inner(g),
 					Arbitrary::arbitrary(g),
+					Arb::arb_inner(g),
+					Arb::arb_inner(g),
 				)
 			},
 			7 => Capture(Arb::arb_inner(g), Arb::arb_inner(g)),
-			8 =>
-			{
-				Pick(
-					if g.gen_bool(0.5)
-					{
-						Some(Arb::arb_inner(g))
-					}
-					else
-					{
-						None
-					},
-					Arb::arb_inner(g),
-				)
-			},
-			9 =>
-			{
-				Load(
-					Arbitrary::arbitrary(g),
-					Arb::arb_inner(g),
-				)
-			},
-			10 => Store,
-			11 => Value(Arb::arb_inner(g)),
+			8 => Pick(Arb::arb_inner(g)),
+			9 => PickI(Arb::arb_inner(g), Arb::arb_inner(g)),
+			10 => Load(Arbitrary::arbitrary(g), Arb::arb_inner(g)),
+			11 => Store,
+			12 => Value(Arb::arb_inner(g)),
+			13 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		})
 	}
@@ -238,7 +221,7 @@ fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
-		| Load(..) | Store | Value(..) => [].iter(),
+		| PickI(..) | Load(..) | Store | Value(..) | Invalid(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -274,16 +257,17 @@ fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 	use Instruction::*;
 	match instr
 	{
-		Echo(first, second, _) | Duplicate(first, second, _) | Capture(first, second) =>
+		Echo(_, first, second) | Duplicate(_, first, second) | Capture(first, second) =>
 		{
 			vec![(1, first.value()), (2, second.value())]
 		},
 		EchoLong(b) => vec![(1, b.value())],
-		Pick(imm, b) => vec![(1 + (imm.is_some() as usize), b.value())],
+		Pick(b) => vec![(1, b.value())],
+		PickI(_, b) => vec![(2, b.value())],
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..) | Call(..) | Load(..) | Store | Value(..) => vec![],
+		Jump(..) | Call(..) | Load(..) | Store | Value(..) | Invalid(..) => vec![],
 	}
 	.into_iter()
 }
@@ -299,9 +283,13 @@ fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 	let instruction_clone = instr.clone();
 	match instr
 	{
-		Echo(first, _, _) if idx == 1 => ref_type([first.value]),
-		Echo(_, second, _) if idx == 2 => ref_type([second.value]),
+		Echo(_, first, _) if idx == 1 => ref_type([first.value]),
+		Echo(_, _, second) if idx == 2 => ref_type([second.value]),
 		EchoLong(b) if idx == 1 => ref_type([b.value]),
+		Duplicate(_, first, _) if idx == 1 => ref_type([first.value]),
+		Duplicate(_, _, second) if idx == 2 => ref_type([second.value]),
+		Capture(first, _) if idx == 1 => ref_type([first.value]),
+		Capture(_, second) if idx == 2 => ref_type([second.value]),
 		Alu(_, b) if idx == 1 => ref_type([b.value]),
 		Alu2(_, _, b) if idx == 2 => ref_type([b.value]),
 		_ =>
