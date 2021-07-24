@@ -496,11 +496,8 @@ map_mnemonics! {
 			ReferenceParser<5>
 		> => (*imm, *target)
 	}
-	"ld" (Load(signed, size, len)) = {
-		((signed, size), len) <= CommaBetween<
-			IntSize,
-			VecLength
-		> => ((*signed, *size), *len)
+	"ld" (Load(signed, size)) = {
+		(signed, size) <= IntSize => (*signed, *size)
 	}
 	"st" (Store) = {
 		() <= () => ()

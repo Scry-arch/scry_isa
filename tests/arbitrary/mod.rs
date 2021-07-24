@@ -86,7 +86,6 @@ impl Arbitrary for Arb<Instruction>
 				Load(
 					Arbitrary::arbitrary(g),
 					Arb::arb_inner(g),
-					Arb::arb_inner(g),
 				)
 			},
 			10 => Store,

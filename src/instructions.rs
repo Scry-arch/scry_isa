@@ -231,7 +231,7 @@ pub enum Instruction
 	///
 	/// Fields:
 	/// 0. Optional immediate value for the pick condition. In `Some(..)`, this
-	/// instruction 	is of the immediate variant.
+	/// instruction is of the immediate variant.
 	/// 0. Output target.
 	Pick(Option<Bits<5, false>>, Bits<5, false>),
 
@@ -240,10 +240,8 @@ pub enum Instruction
 	/// Fields:
 	/// 0. Whether the loaded integer is signed or unsigned. `true` is signed.
 	/// 0. The scalar size to load as a power of two. I.e. 0 loads 1 byte, 1
-	/// loads 2 bytes, 2 loads 4 bytes, etc. 0. The vector length to load as a
-	/// power of two. I.e. 0 loads 1 integer, 1 loads 2 integers 	2 loads 4
-	/// integers etc. If 7, loads the native vector length for that integer.
-	Load(bool, Bits<3, false>, Bits<3, false>),
+	/// loads 2 bytes, 2 loads 4 bytes, etc.
+	Load(bool, Bits<3, false>),
 
 	/// The store instruction.
 	Store,
