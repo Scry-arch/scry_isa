@@ -142,7 +142,7 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 			// This will result in valid assembly, e.g. if extra is "x" or "0",
 			// the instruction will end on "=>x" or "=>0", which is valid.
 			return TestResult::discard();
-		}
+		},
 		_ => (),
 	}
 

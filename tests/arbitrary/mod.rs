@@ -1,6 +1,6 @@
 use duplicate::{duplicate, duplicate_inline};
+use num_traits::int::PrimInt;
 use quickcheck::{empty_shrinker, Arbitrary, Gen};
-use rand::{seq::SliceRandom, Rng};
 use scry_isa::{
 	Alu2OutputVariant, Alu2Variant, AluVariant, Bits, CallVariant, Instruction, Parser,
 	StackControlVariant,
@@ -14,18 +14,28 @@ where
 	Self: Arbitrary,
 {
 	/// Constructs an arbitrary `T` and returns it.
-	pub fn arb_inner<G: Gen>(g: &mut G) -> T
+	pub fn arb_inner(g: &mut Gen) -> T
 	{
 		Self::arbitrary(g).0
 	}
 }
 
+/// Generates arbitrary numbers within the range [low, high[.
+fn gen_range<T: Arbitrary + PrimInt>(g: &mut Gen, low: T, high: T) -> T
+{
+	let base = T::arbitrary(g);
+	let diff = high - low;
+	let modulo = base % diff;
+	modulo + if modulo < T::zero() { high } else { low }
+}
+
 impl<const N: u32, const SIGNED: bool> Arbitrary for Arb<Bits<N, SIGNED>>
 {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	fn arbitrary(g: &mut Gen) -> Self
 	{
 		Self(Bits {
-			value: g.gen_range(
+			value: gen_range(
+				g,
 				Bits::<N, SIGNED>::min().value,
 				Bits::<N, SIGNED>::max().value + 1,
 			),
@@ -40,10 +50,10 @@ impl<const N: u32, const SIGNED: bool> Arbitrary for Arb<Bits<N, SIGNED>>
 
 impl Arbitrary for Arb<Instruction>
 {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	fn arbitrary(g: &mut Gen) -> Self
 	{
 		use Instruction::*;
-		Self(match g.gen_range(0, Instruction::VARIANT_COUNT)
+		Self(match gen_range(g, 0, Instruction::VARIANT_COUNT)
 		{
 			0 => Jump(Arb::arb_inner(g), Arb::arb_inner(g)),
 			1 => Call(Arb::arb_inner(g), Arb::arb_inner(g)),
@@ -82,9 +92,8 @@ duplicate_inline! {
 	[name;[AluVariant];[Alu2Variant];[Alu2OutputVariant];[CallVariant];[StackControlVariant];]
 	impl Arbitrary for Arb<name>
 	{
-		fn arbitrary<G: Gen>(g: &mut G) -> Self {
-			use rand::seq::SliceRandom;
-			Self(name::ALL_VARIANTS.choose(g).unwrap().clone())
+		fn arbitrary(g: &mut Gen) -> Self {
+			Self(g.choose(&name::ALL_VARIANTS).unwrap().clone())
 		}
 	}
 }
@@ -93,19 +102,19 @@ duplicate_inline! {
 pub type ArbSymbol = Arb<String>;
 impl Arbitrary for ArbSymbol
 {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	fn arbitrary(g: &mut Gen) -> Self
 	{
 		const SYMBOL_CHARS: &'static str =
 			"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.";
 
-		let size = g.gen_range(1, g.size());
+		let size = gen_range(g, 1, g.size());
 		let mut result = String::new();
 
 		// First character cannot be numeric
 		result.push(
 			SYMBOL_CHARS
 				.chars()
-				.nth(g.gen_range(10, SYMBOL_CHARS.len()))
+				.nth(gen_range(g, 10, SYMBOL_CHARS.len()))
 				.unwrap(),
 		);
 
@@ -114,7 +123,7 @@ impl Arbitrary for ArbSymbol
 			result.push(
 				SYMBOL_CHARS
 					.chars()
-					.nth(g.gen_range(0, SYMBOL_CHARS.len()))
+					.nth(gen_range(g, 0, SYMBOL_CHARS.len()))
 					.unwrap(),
 			);
 		}
@@ -150,7 +159,7 @@ impl Arbitrary for ArbSymbol
 pub type ArbReference = Arb<Vec<(Arb<String>, i32)>>;
 impl Arbitrary for ArbReference
 {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	fn arbitrary(g: &mut Gen) -> Self
 	{
 		let mut result = Vec::<Arb<String>>::arbitrary(g);
 		// Ensure there is at least 1
@@ -195,7 +204,7 @@ pub enum OperandSubstitution
 }
 impl Arbitrary for OperandSubstitution
 {
-	fn arbitrary<G: Gen>(_: &mut G) -> Self
+	fn arbitrary(_: &mut Gen) -> Self
 	{
 		unimplemented!()
 	}
@@ -307,7 +316,7 @@ fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 pub(crate) struct AssemblyInstruction(pub Instruction, pub Vec<(usize, OperandSubstitution)>);
 impl Arbitrary for AssemblyInstruction
 {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	fn arbitrary(g: &mut Gen) -> Self
 	{
 		let instruction = Arb::arbitrary(g).0;
 		let mut substitutions = Vec::new();
@@ -315,7 +324,7 @@ impl Arbitrary for AssemblyInstruction
 		for idx in offset_index(&instruction)
 		{
 			// Sometimes keep the integer offset
-			if g.gen_bool(0.5)
+			if bool::arbitrary(g)
 			{
 				substitutions.push((idx, OperandSubstitution::Offset(Arbitrary::arbitrary(g))))
 			}
@@ -325,9 +334,9 @@ impl Arbitrary for AssemblyInstruction
 		for (idx, value) in references(&instruction)
 		{
 			// Sometimes keep the integer references
-			if g.gen_bool(0.5)
+			if bool::arbitrary(g)
 			{
-				if value == 0 && g.gen_bool(0.5)
+				if value == 0 && bool::arbitrary(g)
 				{
 					// Sometimes omit the symbol for referencing the next instruction
 					// i.e. "=>0" becomes "=>"
@@ -336,7 +345,7 @@ impl Arbitrary for AssemblyInstruction
 				else
 				{
 					let mut result_refs = Vec::new();
-					let first_offset = g.gen_range(0, value + 1);
+					let first_offset = gen_range(g, 0, value + 1);
 					result_refs.push((Arbitrary::arbitrary(g), (1 + first_offset) * 2));
 
 					let mut value_left = value - first_offset;
@@ -348,11 +357,11 @@ impl Arbitrary for AssemblyInstruction
 						if next_branch_to
 						{
 							last_address =
-								g.gen_range(i32::MIN / 2, (i32::MAX / 2) - value_left) * 2;
+								gen_range(g, i32::MIN / 2, (i32::MAX / 2) - value_left) * 2;
 						}
 						else
 						{
-							let next_offset = g.gen_range(1, 1 + value_left);
+							let next_offset = gen_range(g, 1, 1 + value_left);
 							last_address += next_offset * 2;
 							value_left -= next_offset;
 						}
@@ -574,9 +583,9 @@ pub enum SeparatorType
 }
 impl Arbitrary for SeparatorType
 {
-	fn arbitrary<G: Gen>(g: &mut G) -> Self
+	fn arbitrary(g: &mut Gen) -> Self
 	{
 		use SeparatorType::*;
-		*[AtEnd, AtStart, InMiddle, Alone].choose(g).unwrap()
+		*g.choose(&[AtEnd, AtStart, InMiddle, Alone]).unwrap()
 	}
 }
