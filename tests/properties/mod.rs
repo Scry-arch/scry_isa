@@ -1,12 +1,15 @@
-use crate::arbitrary::{Arb, AssemblyInstruction, OperandSubstitution, SeparatorType};
+use crate::arbitrary::SeparatorType;
 use quickcheck::TestResult;
-use scry_isa::{Instruction, Parser};
+use scry_isa::{
+	arbitrary::{ArbReference, AssemblyInstruction, OperandSubstitution},
+	Instruction, Parser,
+};
 use std::cell::Cell;
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
 #[quickcheck]
-fn print_then_parse(Arb(instr): Arb<Instruction>) -> bool
+fn print_then_parse(instr: Instruction) -> bool
 {
 	let mut buffer = String::new();
 	if let Err(err) = Instruction::print(&instr, &mut buffer)
@@ -62,7 +65,7 @@ fn parse_assembly(assembly: AssemblyInstruction) -> bool
 /// always within the tokens of the instruction
 #[quickcheck]
 fn error_only_in_instruction(
-	Arb(instr): Arb<Instruction>,
+	instr: Instruction,
 	inject: char,
 	inject_rest: String,
 	mut inject_idx: usize,
@@ -134,7 +137,7 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 
 	match assembly.1.last()
 	{
-		Some((_, OperandSubstitution::Ref(Arb(vec))))
+		Some((_, OperandSubstitution::Ref(ArbReference(vec))))
 			if vec.len() == 0
 				&& extra
 					.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.') =>
@@ -142,7 +145,7 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 			// This will result in valid assembly, e.g. if extra is "x" or "0",
 			// the instruction will end on "=>x" or "=>0", which is valid.
 			return TestResult::discard();
-		},
+		}
 		_ => (),
 	}
 
