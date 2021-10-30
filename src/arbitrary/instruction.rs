@@ -4,7 +4,7 @@ use crate::{
 };
 use duplicate::duplicate_inline;
 use quickcheck::{Arbitrary, Gen};
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 
 impl Arbitrary for Instruction
 {
@@ -63,14 +63,33 @@ duplicate_inline! {
 	}
 }
 
+/// Trait for arbitrary-instruction-generating structs
+pub trait ArbInstruction: Arbitrary
+{
+	fn extract(self) -> Instruction;
+}
+impl ArbInstruction for Instruction
+{
+	fn extract(self) -> Instruction
+	{
+		self
+	}
+}
+
 /// An instruction in assembly format.
+///
+/// Can provide a generic type that restricts which instruction are generated.
 #[derive(Clone, Debug)]
-pub struct AssemblyInstruction(pub Instruction, pub Vec<(usize, OperandSubstitution)>);
-impl Arbitrary for AssemblyInstruction
+pub struct AssemblyInstruction<I: ArbInstruction = Instruction>(
+	pub Instruction,
+	pub Vec<(usize, OperandSubstitution)>,
+	PhantomData<I>,
+);
+impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 {
 	fn arbitrary(g: &mut Gen) -> Self
 	{
-		let instruction = Arbitrary::arbitrary(g);
+		let instruction = I::arbitrary(g).extract();
 		let mut substitutions = Vec::new();
 		// Replace integer offsets with symbols
 		for idx in offset_index(&instruction)
@@ -124,7 +143,7 @@ impl Arbitrary for AssemblyInstruction
 				}
 			}
 		}
-		Self(instruction, substitutions)
+		Self(instruction, substitutions, PhantomData)
 	}
 
 	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
@@ -137,7 +156,7 @@ impl Arbitrary for AssemblyInstruction
 			let (removed_idx, removed_sub) = substitutions.remove(i);
 
 			// shrink by removing a substitution
-			result.push(Self(self.0.clone(), substitutions.clone()));
+			result.push(Self(self.0.clone(), substitutions.clone(), PhantomData));
 
 			match removed_sub
 			{
@@ -152,7 +171,7 @@ impl Arbitrary for AssemblyInstruction
 
 						let mut subs = substitutions.clone();
 						subs.push((removed_idx, OperandSubstitution::Offset(sym.clone())));
-						result.push(Self(instr_clone, subs));
+						result.push(Self(instr_clone, subs, PhantomData));
 					});
 				},
 				OperandSubstitution::Ref(ArbReference(ref refs)) =>
@@ -183,7 +202,7 @@ impl Arbitrary for AssemblyInstruction
 									removed_idx,
 									OperandSubstitution::Ref(ArbReference(refs_clone)),
 								));
-								result.push(Self(instr_clone, subs));
+								result.push(Self(instr_clone, subs, PhantomData));
 							});
 						}
 
@@ -207,7 +226,7 @@ impl Arbitrary for AssemblyInstruction
 							removed_idx,
 							OperandSubstitution::Ref(ArbReference(refs_clone)),
 						));
-						result.push(Self(instr_clone, subs));
+						result.push(Self(instr_clone, subs, PhantomData));
 					}
 				},
 			}
@@ -216,14 +235,14 @@ impl Arbitrary for AssemblyInstruction
 			removed_sub.shrink().for_each(|sym| {
 				let mut subs = substitutions.clone();
 				subs.push((removed_idx, sym));
-				result.push(Self(self.0.clone(), subs));
+				result.push(Self(self.0.clone(), subs, PhantomData));
 			})
 		}
 
 		Box::new(result.into_iter())
 	}
 }
-impl AssemblyInstruction
+impl<I: ArbInstruction> AssemblyInstruction<I>
 {
 	/// Returns the assembly instruction and a resolver for any symbols.
 	pub fn tokens_and_resolver(&self) -> (String, impl Fn(Option<&str>, &str) -> i32)
@@ -321,5 +340,61 @@ impl AssemblyInstruction
 			let start = start.map(resolve).unwrap_or(0);
 			resolve(end) - start
 		})
+	}
+}
+
+/// Arbitrary instructions that output at least one value using an offset.
+#[derive(Clone, Debug)]
+pub struct WithOutput(pub Instruction);
+impl ArbInstruction for WithOutput
+{
+	fn extract(self) -> Instruction
+	{
+		self.0
+	}
+}
+impl Arbitrary for WithOutput
+{
+	fn arbitrary(g: &mut Gen) -> Self
+	{
+		use Instruction::*;
+		Self(match gen_range(g, 0, 8)
+		{
+			0 =>
+			{
+				Echo(
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+				)
+			},
+			1 => EchoLong(Arbitrary::arbitrary(g)),
+			2 => Alu(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			3 =>
+			{
+				Alu2(
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+				)
+			},
+			4 =>
+			{
+				Duplicate(
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+				)
+			},
+			5 => Capture(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			6 => Pick(Arbitrary::arbitrary(g)),
+			7 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			_ => unreachable!(),
+		})
+	}
+
+	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
+	{
+		Box::new(self.0.shrink().map(|i| Self(i)))
 	}
 }
