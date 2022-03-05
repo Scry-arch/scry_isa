@@ -80,14 +80,8 @@ macro_rules! test_assembly {
 				$(expected_bin = Some($bin);)?
 				test_case($asm, test_assembly!{@prioritize $asm $($asm2)?},
 					|start: Option<&str>, end: &str|{
-						$(	return
-							(	addresses[end] -
-								if let Some(start) = start {
-									addresses[start]
-								} else {
-									$addr0
-								}
-							);
+						$(
+							return addresses[end] - start.map_or($addr0, |st| addresses[st]);
 						)?
 						panic!("No symbols given.");
 					},

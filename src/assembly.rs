@@ -414,7 +414,13 @@ macro_rules! map_mnemonics_impl {
                 let first_token = tokens.next()
                     .ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))?;
                 if let Some((mnemonic, parser_idx)) = MNEMONIC_PARSERS.iter()
-                    .find(|(mnemonic, _)| first_token.starts_with(*mnemonic))
+                    .find(|(mnemonic, _)| {
+                        first_token.starts_with(*mnemonic) &&
+                        // Make sure the next char is not a valid char for symbols
+                        first_token.chars().nth(mnemonic.len()).map_or(true , |c|
+                        !c.is_ascii_alphanumeric() && c != '_' && c != '.' && c.is_ascii()
+                        )
+                    })
                 {
                     let consumed_first = first_token.len() == mnemonic.len();
                     let tokens = Some(first_token.split_at(mnemonic.len()).1).into_iter()

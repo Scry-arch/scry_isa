@@ -5,6 +5,7 @@ use scry_isa::{
 	Instruction, Parser,
 };
 use std::cell::Cell;
+use scry_isa::arbitrary::ArbSymbol;
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
@@ -228,4 +229,22 @@ fn different_separator_tokenization(
 	{
 		TestResult::discard()
 	}
+}
+
+/// Tests that if encounters an identifier that isn't an instruction, but does
+/// start with the mnemonic of an instruction, a correct error is thrown
+#[quickcheck]
+fn error_on_mnemonic_prefix(assembly: AssemblyInstruction, ident_post: ArbSymbol, rest: String) -> bool
+{
+	// First get a mnemonic
+	let mut test_string = assembly.tokens_and_resolver().0.split(' ').next().unwrap().to_string();
+	
+	// then add a postfix, such that it becomes a symbol
+	test_string.push_str(ident_post.0.as_str());
+	
+	// Then add rest of string
+	test_string.push_str(rest.as_str());
+	
+	// Try to parse, and ensure we et an error
+	Instruction::parse(test_string.split_ascii_whitespace(), |_: Option<&str>, _:&str| 0).is_err()
 }
