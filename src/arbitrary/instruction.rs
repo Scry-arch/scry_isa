@@ -4,7 +4,7 @@ use crate::{
 };
 use duplicate::duplicate_inline;
 use quickcheck::{Arbitrary, Gen};
-use std::{collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
 impl Arbitrary for Instruction
 {
@@ -64,7 +64,7 @@ duplicate_inline! {
 }
 
 /// Trait for arbitrary-instruction-generating structs
-pub trait ArbInstruction: Arbitrary
+pub trait ArbInstruction: Arbitrary + Debug
 {
 	fn extract(self) -> Instruction;
 }
@@ -80,11 +80,14 @@ impl ArbInstruction for Instruction
 ///
 /// Can provide a generic type that restricts which instruction are generated.
 #[derive(Clone, Debug)]
-pub struct AssemblyInstruction<I: ArbInstruction = Instruction>(
-	pub Instruction,
-	pub Vec<(usize, OperandSubstitution)>,
-	PhantomData<I>,
-);
+pub struct AssemblyInstruction<I: ArbInstruction = Instruction>
+{
+	/// Instruction represented by the assembly
+	pub instruction: Instruction,
+	/// The token index and type of a operand substitution
+	pub substitutions: Vec<(usize, OperandSubstitution)>,
+	phantom: PhantomData<I>,
+}
 impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 {
 	fn arbitrary(g: &mut Gen) -> Self
@@ -116,7 +119,15 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 				else
 				{
 					let mut result_refs = Vec::new();
-					let first_offset = gen_range(g, 0, value + 1);
+					// 50% chance of needing a jump
+					let first_offset = if bool::arbitrary(g)
+					{
+						value
+					}
+					else
+					{
+						gen_range(g, 0, value + 1)
+					};
 					result_refs.push((Arbitrary::arbitrary(g), (1 + first_offset) * 2));
 
 					let mut value_left = value - first_offset;
@@ -127,15 +138,23 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 					{
 						if next_branch_to
 						{
-							last_address =
-								gen_range(g, i32::MIN / 2, (i32::MAX / 2) - value_left) * 2;
+							last_address = gen_range(g, 0, (i32::MAX / 2) - value_left) * 2;
 						}
 						else
 						{
-							let next_offset = gen_range(g, 1, 1 + value_left);
+							// 50% chance of additional links
+							let next_offset = if bool::arbitrary(g)
+							{
+								value_left
+							}
+							else
+							{
+								gen_range(g, 1, value_left + 1)
+							};
 							last_address += next_offset * 2;
 							value_left -= next_offset;
 						}
+						assert!(last_address >= 0);
 						result_refs.push((Arbitrary::arbitrary(g), last_address));
 						next_branch_to = !next_branch_to;
 					}
@@ -143,35 +162,41 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 				}
 			}
 		}
-		Self(instruction, substitutions, PhantomData)
+		Self {
+			instruction,
+			substitutions,
+			phantom: PhantomData,
+		}
 	}
 
 	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
 	{
 		let mut result = Vec::new();
 
-		for i in 0..self.1.len()
+		for i in 0..self.substitutions.len()
 		{
-			let mut substitutions = self.1.clone();
+			let mut substitutions = self.substitutions.clone();
 			let (removed_idx, removed_sub) = substitutions.remove(i);
 
 			// shrink by removing a substitution
-			result.push(Self(self.0.clone(), substitutions.clone(), PhantomData));
-
 			match removed_sub
 			{
 				OperandSubstitution::Offset(ref sym) =>
 				{
 					// Shrink by shrinking the offset
-					let mut tmp_clone = self.0.clone();
+					let mut tmp_clone = self.instruction.clone();
 					let offset = *get_offset_value(&mut tmp_clone, removed_idx);
 					offset.shrink().for_each(|o| {
-						let mut instr_clone = self.0.clone();
+						let mut instr_clone = self.instruction.clone();
 						*get_offset_value_mut(&mut instr_clone, removed_idx) = o;
 
 						let mut subs = substitutions.clone();
 						subs.push((removed_idx, OperandSubstitution::Offset(sym.clone())));
-						result.push(Self(instr_clone, subs, PhantomData));
+						result.push(Self {
+							instruction: instr_clone,
+							substitutions: subs,
+							phantom: PhantomData,
+						});
 					});
 				},
 				OperandSubstitution::Ref(ArbReference(ref refs)) =>
@@ -189,25 +214,28 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 
 							let offset = ((removed_address - previous_address) / 2) - 1;
 							offset.shrink().for_each(|o| {
-								let mut instr_clone = self.0.clone();
+								let mut instr_clone = self.instruction.clone();
 								let mut refs_clone = refs_clone.clone();
 
 								refs_clone
-									.push((removed_sym.clone(), previous_address + 2 + (o * 2)));
-								*get_reference_value_mut(&mut instr_clone, removed_idx) -=
-									offset - o;
+									.push((removed_sym.clone(), previous_address + ((o + 1) * 2)));
+								*get_reference_value_mut(&mut instr_clone, removed_idx) = o;
 
 								let mut subs = substitutions.clone();
 								subs.push((
 									removed_idx,
 									OperandSubstitution::Ref(ArbReference(refs_clone)),
 								));
-								result.push(Self(instr_clone, subs, PhantomData));
+								result.push(Self {
+									instruction: instr_clone,
+									substitutions: subs,
+									phantom: PhantomData,
+								});
 							});
 						}
 
 						// shrink by removing a reference link
-						let mut instr_clone = self.0.clone();
+						let mut instr_clone = self.instruction.clone();
 						let mut refs_clone = refs.clone();
 						let (_, removed_address) = refs_clone.pop().unwrap();
 
@@ -226,7 +254,11 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 							removed_idx,
 							OperandSubstitution::Ref(ArbReference(refs_clone)),
 						));
-						result.push(Self(instr_clone, subs, PhantomData));
+						result.push(Self {
+							instruction: instr_clone,
+							substitutions: subs,
+							phantom: PhantomData,
+						});
 					}
 				},
 			}
@@ -235,7 +267,11 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 			removed_sub.shrink().for_each(|sym| {
 				let mut subs = substitutions.clone();
 				subs.push((removed_idx, sym));
-				result.push(Self(self.0.clone(), subs, PhantomData));
+				result.push(Self {
+					instruction: self.instruction.clone(),
+					substitutions: subs,
+					phantom: PhantomData,
+				});
 			})
 		}
 
@@ -244,11 +280,20 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 }
 impl<I: ArbInstruction> AssemblyInstruction<I>
 {
+	pub fn new(instruction: Instruction, substitutions: Vec<(usize, OperandSubstitution)>) -> Self
+	{
+		Self {
+			instruction,
+			substitutions,
+			phantom: PhantomData,
+		}
+	}
+
 	/// Returns the assembly instruction and a resolver for any symbols.
 	pub fn tokens_and_resolver(&self) -> (String, impl Fn(Option<&str>, &str) -> i32)
 	{
 		let mut buffer = String::new();
-		Instruction::print(&self.0, &mut buffer).unwrap();
+		Instruction::print(&self.instruction, &mut buffer).unwrap();
 		let mut tokens: Vec<_> = buffer
 			.split_ascii_whitespace()
 			.map(|t| String::from(t))
@@ -256,7 +301,7 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 
 		let mut symbol_addresses = HashMap::new();
 
-		for (idx, substitution) in self.1.iter()
+		for (idx, substitution) in self.substitutions.iter()
 		{
 			match substitution
 			{
@@ -265,11 +310,11 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 					// Extract offset value
 					let split =
 						tokens[*idx].split_at(tokens[*idx].find(",").unwrap_or(tokens[*idx].len()));
-					let offset_value = *get_offset_value(&self.0, *idx);
+					let offset_value = *get_offset_value(&self.instruction, *idx);
 
 					// replace offset with symbol
 					let mut replacement = sym.clone();
-					let symbol_address = match self.0
+					let symbol_address = match self.instruction
 					{
 						Instruction::Jump(_, second) if *idx == 1 && offset_value > 0 =>
 						{
@@ -337,8 +382,9 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 					})
 					.unwrap_or_else(|| panic!("Unknown symbol: {}", sym))
 			};
-			let start = start.map(resolve).unwrap_or(0);
-			resolve(end) - start
+			let start_addr = start.map(resolve).unwrap_or(0);
+			let sym_addr = resolve(end);
+			sym_addr - start_addr
 		})
 	}
 }

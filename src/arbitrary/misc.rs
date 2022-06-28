@@ -184,6 +184,7 @@ impl Arbitrary for ArbReference
 			result
 				.into_iter()
 				.enumerate()
+				// Placeholder addresses
 				.map(|(i, s)| (s, ((i + 1) * 2) as i32))
 				.collect::<Vec<_>>(),
 		)

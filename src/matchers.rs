@@ -135,10 +135,10 @@ pub trait Parser<'a>
 	///
 	/// The given function is used for resolving distances (in bytes) between
 	/// symbols. If (Some(x), y) should return the distance between symbols x
-	/// and y. If x has a lower address than y, the result should be positive.
-	/// If x has a higher adderss than y, the result should be negative.
-	/// If (None, y), the first symbol is the one for the current instruction
-	/// being parsed.
+	/// and y (i.e. subtract absolute addresses). If x has a lower address than
+	/// y, the result should be positive. If x has a higher address than y, the
+	/// result should be negative. If (None, y), the first symbol is the one for
+	/// the current instruction being parsed.
 	///
 	/// The given iterator must produce tokens of only ASCII characters free of
 	/// whitespace. Effectively, the iterator must behave as if it was produced
@@ -529,23 +529,9 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 			})
 			.or_else(|err| {
 				Arrow::parse::<_, F, _>(tokens.clone(), f)
-					.and_then(|(_, consumed, bytes)| {
-						Bits::new(0)
-							.ok_or(ParseError {
-								start_token: 0,
-								start_idx: 0,
-								end_token: consumed,
-								end_idx: bytes,
-								err_type: ParseErrorType::InternalError(concat!(
-									file!(),
-									':',
-									line!()
-								)),
-							})
-							.map(|b| (b, consumed, bytes))
-					})
+					.and_then(|(_, consumed, bytes)| Ok((Bits::zero(), consumed, bytes)))
 					.map_err(|_| err)
-			})
+			}) //.and_then(|r| Ok(dbg!(r)))
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result

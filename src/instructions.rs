@@ -33,6 +33,11 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 		}
 	}
 
+	pub fn zero() -> Self
+	{
+		Self::new(0).unwrap()
+	}
+
 	pub fn value(&self) -> i32
 	{
 		self.value

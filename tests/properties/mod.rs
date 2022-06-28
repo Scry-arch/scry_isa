@@ -1,11 +1,10 @@
 use crate::arbitrary::SeparatorType;
 use quickcheck::TestResult;
 use scry_isa::{
-	arbitrary::{ArbReference, AssemblyInstruction, OperandSubstitution},
+	arbitrary::{ArbReference, ArbSymbol, AssemblyInstruction, OperandSubstitution},
 	Instruction, Parser,
 };
 use std::cell::Cell;
-use scry_isa::arbitrary::ArbSymbol;
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
@@ -59,7 +58,9 @@ fn parse_assembly(assembly: AssemblyInstruction) -> bool
 {
 	let (tokens, resolver) = assembly.tokens_and_resolver();
 	Instruction::parse(tokens.split_ascii_whitespace(), resolver)
-		.map_or(false, |(parsed_instr, ..)| assembly.0 == parsed_instr)
+		.map_or(false, |(parsed_instr, ..)| {
+			assembly.instruction == parsed_instr
+		})
 }
 
 /// Tests that if parsing fails because of bad syntax, the reported span is
@@ -136,17 +137,18 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 
 	let chained = instr_tokens.iter().cloned().chain(extra_tokens.into_iter());
 
-	match assembly.1.last()
+	match assembly.substitutions.last()
 	{
 		Some((_, OperandSubstitution::Ref(ArbReference(vec))))
 			if vec.len() == 0
 				&& extra
+					.trim_start()
 					.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.') =>
 		{
 			// This will result in valid assembly, e.g. if extra is "x" or "0",
 			// the instruction will end on "=>x" or "=>0", which is valid.
 			return TestResult::discard();
-		}
+		},
 		_ => (),
 	}
 
@@ -164,7 +166,7 @@ fn different_separator_tokenization(
 	assembly: AssemblyInstruction,
 	t1: SeparatorType,
 	t_rest: Vec<SeparatorType>,
-) -> quickcheck::TestResult
+) -> TestResult
 {
 	const SEPARATORS: &[&'static str] = &["=>", "+", ","];
 
@@ -234,17 +236,31 @@ fn different_separator_tokenization(
 /// Tests that if encounters an identifier that isn't an instruction, but does
 /// start with the mnemonic of an instruction, a correct error is thrown
 #[quickcheck]
-fn error_on_mnemonic_prefix(assembly: AssemblyInstruction, ident_post: ArbSymbol, rest: String) -> bool
+fn error_on_mnemonic_prefix(
+	assembly: AssemblyInstruction,
+	ident_post: ArbSymbol,
+	rest: String,
+) -> bool
 {
 	// First get a mnemonic
-	let mut test_string = assembly.tokens_and_resolver().0.split(' ').next().unwrap().to_string();
-	
+	let mut test_string = assembly
+		.tokens_and_resolver()
+		.0
+		.split(' ')
+		.next()
+		.unwrap()
+		.to_string();
+
 	// then add a postfix, such that it becomes a symbol
 	test_string.push_str(ident_post.0.as_str());
-	
+
 	// Then add rest of string
 	test_string.push_str(rest.as_str());
-	
+
 	// Try to parse, and ensure we et an error
-	Instruction::parse(test_string.split_ascii_whitespace(), |_: Option<&str>, _:&str| 0).is_err()
+	Instruction::parse(
+		test_string.split_ascii_whitespace(),
+		|_: Option<&str>, _: &str| 0,
+	)
+	.is_err()
 }
