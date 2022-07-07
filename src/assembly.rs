@@ -1987,12 +1987,12 @@ map_mnemonics! {
 	{
 		() = ()
 	}
-	"val" (Value(v)) [ 0 0 0 1 0 0 0 1 [v:8] ]
+	"nop" (Nop) [ 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 ]
 	{
-		v <= Or<
-			ValueAlias,
-			Bits<8, false>,
-			_
-		> => (*v)
+		() = ()
+	}
+	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8] ]
+	{
+		v <= Implicit<NonZeroBits<8, false>,255> => (*v)
 	}
 }

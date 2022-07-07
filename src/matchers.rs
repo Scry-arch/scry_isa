@@ -1,13 +1,9 @@
-use crate::{
-	instructions::{Alu2OutputVariant, Bits},
-	ParseErrorType::OutOfBoundValue,
-};
+use crate::instructions::{Alu2OutputVariant, Bits};
 use duplicate::duplicate_inline;
-use lazy_static::lazy_static;
 use std::{
 	borrow::Borrow,
 	convert::{TryFrom, TryInto},
-	fmt::Write,
+	fmt::{Debug, Write},
 	marker::PhantomData,
 };
 
@@ -48,7 +44,7 @@ impl<'a> ParseErrorType<'a>
 {
 	fn from_bits<const SIZE: u32, const SIGNED: bool>(value: isize) -> Self
 	{
-		OutOfBoundValue(
+		ParseErrorType::OutOfBoundValue(
 			value,
 			Bits::<SIZE, SIGNED>::min().value() as isize,
 			Bits::<SIZE, SIGNED>::max().value() as isize,
@@ -120,8 +116,8 @@ pub trait Parser<'a>
 {
 	type Internal;
 
-	const ALONE_RIGHT: bool;
 	const ALONE_LEFT: bool;
+	const ALONE_RIGHT: bool;
 
 	/// Tries parsing the given tokens.
 	///
@@ -320,6 +316,108 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
 		i32::print(&internal.value, out)
+	}
+}
+
+pub struct NonZeroBits<const SIZE: u32, const SIGNED: bool>(Bits<SIZE, SIGNED>);
+impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for NonZeroBits<SIZE, SIGNED>
+{
+	type Internal = <Bits<SIZE, SIGNED> as Parser<'a>>::Internal;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		Bits::<SIZE, SIGNED>::parse(tokens, f).and_then(|(bits, consumed, bytes)| {
+			if bits != Bits::zero()
+			{
+				Ok((bits, consumed, bytes))
+			}
+			else
+			{
+				Err(ParseError {
+					start_token: 0,
+					start_idx: 0,
+					end_token: consumed,
+					end_idx: bytes,
+					err_type: ParseErrorType::OutOfBoundValue(0, 1, 255),
+				})
+			}
+		})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		Bits::<SIZE, SIGNED>::print(internal, out)
+	}
+}
+
+pub struct Implicit<P, const DEFAULT: i32>(P);
+impl<'a, P, const DEFAULT: i32> Parser<'a> for Implicit<P, DEFAULT>
+where
+	P: Parser<'a>,
+	P::Internal: TryFrom<i32> + Eq,
+	<P::Internal as TryFrom<i32>>::Error: Debug,
+{
+	type Internal = <P as Parser<'a>>::Internal;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		match P::parse(tokens, f)
+		{
+			Ok((bits, consumed, bytes)) if bits != DEFAULT.try_into().unwrap() =>
+			{
+				Ok((bits, consumed, bytes))
+			},
+			Ok((_, consumed, bytes)) =>
+			{
+				Err(ParseError {
+					start_token: 0,
+					start_idx: 0,
+					end_token: consumed,
+					end_idx: bytes,
+					err_type: ParseErrorType::Invalid("Must omit implicit value"),
+				})
+			},
+			Err(_) => Ok((DEFAULT.try_into().unwrap(), 0, 0)),
+		}
+	}
+
+	fn print_with_whitespace(
+		internal: &Self::Internal,
+		prev_alone: bool,
+		out: &mut impl Write,
+	) -> std::fmt::Result
+	{
+		if *internal != DEFAULT.try_into().unwrap()
+		{
+			if prev_alone && Self::ALONE_LEFT
+			{
+				out.write_char(' ')?;
+			}
+			P::print(internal, out)
+		}
+		else
+		{
+			Ok(())
+		}
+	}
+
+	fn print(_: &Self::Internal, _: &mut impl Write) -> std::fmt::Result
+	{
+		unreachable!()
 	}
 }
 
@@ -1301,65 +1399,6 @@ impl<'a> Parser<'a> for VecLength<'a>
 		else
 		{
 			Pow2::print(internal, out)
-		}
-	}
-}
-
-pub struct ValueAlias<'a>(PhantomData<&'a ()>);
-impl<'a> ValueAlias<'a>
-{
-	fn value_alias(v: &Bits<8, false>) -> Option<&str>
-	{
-		lazy_static! {
-			static ref ALIASES: Vec<&'static str> = vec!["MAX_VEC_SIZE", "MAX_VEC_ALIGN_MASK",];
-		}
-		ALIASES.get(v.value as usize).map(|s| *s)
-	}
-}
-impl<'a> Parser<'a> for ValueAlias<'a>
-{
-	type Internal = Bits<8, false>;
-
-	const ALONE_LEFT: bool = true;
-	const ALONE_RIGHT: bool = true;
-
-	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
-	where
-		I: Iterator<Item = &'a str> + Clone,
-		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
-	{
-		tokens
-			.next()
-			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
-			.and_then(|t| {
-				duplicate_inline! {
-					[
-						text 					value;
-						["MAX_VEC_SIZE"] 		[0];
-						["MAX_VEC_ALIGN_MASK"] 	[1];
-					]
-					if t.starts_with(text) {
-						return Ok((Bits::new(value).unwrap(), 0, text.len()))
-					}
-				}
-				Err(ParseError::from_token(
-					t,
-					0,
-					ParseErrorType::UnexpectedChars("a value alias or integer"),
-				))
-			})
-	}
-
-	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
-	{
-		if let Some(alias) = Self::value_alias(internal)
-		{
-			out.write_str(alias)
-		}
-		else
-		{
-			Bits::print(internal, out)
 		}
 	}
 }

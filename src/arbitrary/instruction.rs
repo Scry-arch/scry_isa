@@ -1,6 +1,6 @@
 use crate::{
-	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, CallVariant, Instruction, Parser,
-	StackControlVariant,
+	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, Bits, CallVariant, Instruction,
+	Parser, StackControlVariant,
 };
 use duplicate::duplicate_inline;
 use quickcheck::{Arbitrary, Gen};
@@ -46,8 +46,14 @@ impl Arbitrary for Instruction
 			9 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			10 => Load(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			11 => Store,
-			12 => Value(Arbitrary::arbitrary(g)),
-			13 => Invalid(0),
+			12 => Nop,
+			13 =>
+			{
+				// No zero
+				let x = (u8::arbitrary(g) % 255) + 1;
+				Request(Bits::new(x as i32).unwrap())
+			},
+			14 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}

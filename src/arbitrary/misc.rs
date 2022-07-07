@@ -31,7 +31,7 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
-		| PickI(..) | Load(..) | Store | Value(..) | Invalid(..) => [].iter(),
+		| PickI(..) | Load(..) | Store | Request(..) | Invalid(..) | Nop => [].iter(),
 	}
 	.cloned()
 }
@@ -77,7 +77,7 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..) | Call(..) | Load(..) | Store | Value(..) | Invalid(..) => vec![],
+		Jump(..) | Call(..) | Load(..) | Store | Request(..) | Invalid(..) | Nop => vec![],
 	}
 	.into_iter()
 }

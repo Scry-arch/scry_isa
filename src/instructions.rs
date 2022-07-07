@@ -96,7 +96,15 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 		self.value == Self::min().value
 	}
 }
+impl<const SIZE: u32, const SIGNED: bool> TryFrom<i32> for Bits<SIZE, SIGNED>
+{
+	type Error = ();
 
+	fn try_from(value: i32) -> Result<Self, Self::Error>
+	{
+		Bits::new(value).ok_or(())
+	}
+}
 impl<const N: u32> From<Bits<N, false>> for Bits<N, true>
 {
 	fn from(x: Bits<N, false>) -> Self
@@ -369,6 +377,8 @@ pub enum Instruction
 	/// The store instruction.
 	Store,
 
-	/// The value instruction.
-	Value(Bits<8, false>),
+	Nop,
+
+	/// The request instruction.
+	Request(Bits<8, false>),
 }
