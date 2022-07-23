@@ -1,4 +1,4 @@
-use duplicate::duplicate_inline;
+use duplicate::duplicate;
 use std::{
 	convert::TryFrom,
 	ops::{BitAnd, BitXor},
@@ -249,7 +249,7 @@ impl<
 	}
 }
 
-duplicate_inline! {
+duplicate! {
 	[
 		name 					variants;
 		[AluVariant]			[Inc, Dec, Add, Sub, ShiftLeft, ShiftRight, RotateLeft, RotateRight];

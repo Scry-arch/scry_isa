@@ -1,5 +1,5 @@
 use crate::{arbitrary::*, Bits, Instruction};
-use duplicate::duplicate;
+use duplicate::duplicate_item;
 use quickcheck::{empty_shrinker, Arbitrary, Gen};
 
 impl<const N: u32, const SIGNED: bool> Arbitrary for Bits<N, SIGNED>
@@ -36,7 +36,7 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 	.cloned()
 }
 
-#[duplicate(
+#[duplicate_item(
 	name					ref_type(inner);
 	[get_offset_value]		[& inner];
 	[get_offset_value_mut]	[&mut inner];
@@ -82,7 +82,7 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 	.into_iter()
 }
 
-#[duplicate(
+#[duplicate_item(
 name						ref_type(inner);
 [get_reference_value]		[& inner];
 [get_reference_value_mut]	[&mut inner];

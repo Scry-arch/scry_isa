@@ -2,7 +2,7 @@ use crate::{
 	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, Bits, CallVariant, Instruction,
 	Parser, StackControlVariant,
 };
-use duplicate::duplicate_inline;
+use duplicate::duplicate;
 use quickcheck::{Arbitrary, Gen};
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
@@ -59,7 +59,7 @@ impl Arbitrary for Instruction
 	}
 }
 
-duplicate_inline! {
+duplicate! {
 	[name;[AluVariant];[Alu2Variant];[Alu2OutputVariant];[CallVariant];[StackControlVariant];]
 	impl Arbitrary for name
 	{

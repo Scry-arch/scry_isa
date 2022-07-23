@@ -1,5 +1,5 @@
 use crate::instructions::{Alu2OutputVariant, Bits};
-use duplicate::duplicate_inline;
+use duplicate::duplicate;
 use std::{
 	borrow::Borrow,
 	convert::{TryFrom, TryInto},
@@ -857,7 +857,7 @@ impl<'a, T: HasWord> Parser<'a> for Keyword<T>
 	}
 }
 
-duplicate_inline! {
+duplicate! {
 	[
 		name	text;
 		[High]	["High"];
@@ -870,7 +870,7 @@ duplicate_inline! {
 	}
 }
 
-duplicate_inline! {
+duplicate! {
 	[
 		name	text		alone_right;
 		[Arrow]	["=>"]		[false];
