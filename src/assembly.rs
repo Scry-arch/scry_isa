@@ -1,6 +1,6 @@
 use crate::{instructions::*, matchers::*};
 use lazy_static::lazy_static;
-use std::{borrow::Borrow, collections::HashMap};
+use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
 
 macro_rules! map_mnemonics {
 
@@ -1635,9 +1635,9 @@ macro_rules! impl_encoding {
             @transitions [$($rest_trans)*]
             $($finalized_transitions)*
             [< $($from)+ >]($($from_args_id,)*) => {
-                let extracted = <Bits<$wildcard_size, false>>::new(
+                let extracted = (
                     $extract(<Bits<$wildcard_size, false>>::SIZE)
-                ).unwrap();
+                ).try_into().unwrap();
                 (   [< $($to)+ >]($($from_args_id,)* extracted ),
                     $done + <Bits<$wildcard_size, false>>::SIZE
                 )
@@ -1701,9 +1701,9 @@ macro_rules! impl_encoding {
                 let fsm_result = [< $($group_fsm_name)+ >]::decode_from($variant, $done);
 
                 (if let [< $($from)+ _ $fsm_name _Invalid >]{} = fsm_result {
-                    let extracted = <Bits<$wildcard_size, false>>::new(
+                    let extracted = (
                         $extract(<Bits<$wildcard_size, false>>::SIZE)
-                    ).unwrap();
+                    ).try_into().unwrap();
                     [< $($to)+ >]($($from_args_id,)* extracted )
                 } else {
                     fsm_result
@@ -1754,7 +1754,7 @@ macro_rules! impl_encoding {
                     new_encode(&[<$($group_state_name)+>]($($from_args_id,)*)).unwrap();
                 let mut group_enc = 0;
                 group_encoder.encode_from(&mut group_enc, 0);
-                let group_wild = <Bits<$wildcard_size, false>>::new(group_enc as i32).unwrap();
+                let group_wild = (group_enc as i32).try_into().unwrap();
                 ([< $($to)+ >]($($from_args_id,)* group_wild), $done)
             }
         }
@@ -1993,6 +1993,6 @@ map_mnemonics! {
 	}
 	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8] ]
 	{
-		v <= Implicit<NonZeroBits<8, false>,255> => (*v)
+		v <= Implicit<Exclude<Bits<8, false>,0>,255> => (*v)
 	}
 }

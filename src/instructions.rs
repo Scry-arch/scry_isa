@@ -1,9 +1,38 @@
 use duplicate::duplicate;
 use std::{
-	convert::TryFrom,
+	convert::{TryFrom, TryInto},
 	ops::{BitAnd, BitXor},
 };
 use variant_count::VariantCount;
+
+/// Trait for bits representing an integer value.
+pub trait BitValue: TryFrom<i32, Error = ()>
+{
+	/// The number of bits needed to represent this value
+	const SIZE: u32;
+
+	/// Whether this value is a signed integer
+	const SIGNED: bool;
+	fn value(&self) -> i32;
+
+	/// The highest integer value.
+	fn get_max() -> Self;
+
+	/// The lowest integer value.
+	fn get_min() -> Self;
+
+	/// Whether it is the highest value.
+	fn is_max(&self) -> bool
+	{
+		self.value() == Self::get_max().value()
+	}
+
+	/// Whether it is the lowest value.
+	fn is_min(&self) -> bool
+	{
+		self.value() == Self::get_min().value()
+	}
+}
 
 /// Represents a set of N bits.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
@@ -11,45 +40,20 @@ pub struct Bits<const N: u32, const SIGNED: bool>
 {
 	pub value: i32,
 }
-
 impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 {
-	pub const SIZE: u32 = N;
-
-	pub fn size(self) -> u32
-	{
-		Self::SIZE
-	}
-
-	pub fn new(value: i32) -> Option<Self>
-	{
-		if Self::max().value() >= value && Self::min().value() <= value
-		{
-			Some(Self { value })
-		}
-		else
-		{
-			None
-		}
-	}
-
 	pub fn zero() -> Self
 	{
-		Self::new(0).unwrap()
-	}
-
-	pub fn value(&self) -> i32
-	{
-		self.value
+		0.try_into().unwrap()
 	}
 
 	/// All bits set to 1.
 	///
-	/// For unsigned, equivalent to `max()`.
+	/// For unsigned, equivalent to `get_max()`.
 	pub fn saturated() -> Self
 	{
 		Self {
-			value: if SIGNED { -1 } else { Self::max().value },
+			value: if SIGNED { -1 } else { Self::get_max().value },
 		}
 	}
 
@@ -58,17 +62,25 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 	{
 		Self { value: 0 }
 	}
+}
+impl<const N: u32, const SIGNED: bool> BitValue for Bits<N, SIGNED>
+{
+	const SIGNED: bool = SIGNED;
+	const SIZE: u32 = N;
 
-	/// The highest integer value.
-	pub fn max() -> Self
+	fn value(&self) -> i32
+	{
+		self.value
+	}
+
+	fn get_max() -> Self
 	{
 		Self {
 			value: if SIGNED { 2i32.pow(N) / 2 } else { 2i32.pow(N) } - 1,
 		}
 	}
 
-	/// The lowest integer value.
-	pub fn min() -> Self
+	fn get_min() -> Self
 	{
 		Self {
 			value: {
@@ -83,26 +95,21 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 			},
 		}
 	}
-
-	/// Whether it is the highest value.
-	pub fn is_max(&self) -> bool
-	{
-		self.value == Self::max().value
-	}
-
-	/// Whether it is the lowest value.
-	pub fn is_min(&self) -> bool
-	{
-		self.value == Self::min().value
-	}
 }
-impl<const SIZE: u32, const SIGNED: bool> TryFrom<i32> for Bits<SIZE, SIGNED>
+impl<const N: u32, const SIGNED: bool> TryFrom<i32> for Bits<N, SIGNED>
 {
 	type Error = ();
 
 	fn try_from(value: i32) -> Result<Self, Self::Error>
 	{
-		Bits::new(value).ok_or(())
+		if Self::get_max().value() >= value && Self::get_min().value() <= value
+		{
+			Ok(Self { value })
+		}
+		else
+		{
+			Err(())
+		}
 	}
 }
 impl<const N: u32> From<Bits<N, false>> for Bits<N, true>
@@ -110,14 +117,14 @@ impl<const N: u32> From<Bits<N, false>> for Bits<N, true>
 	fn from(x: Bits<N, false>) -> Self
 	{
 		// Reinterpret the bits as signed
-		if x.value > Self::max().value
+		if x.value > Self::get_max().value
 		{
-			let remainder = x.value - Self::max().value - 1;
-			Self::new(Self::min().value + remainder).unwrap()
+			let remainder = x.value - Self::get_max().value - 1;
+			(Self::get_min().value + remainder).try_into().unwrap()
 		}
 		else
 		{
-			Self::new(x.value).unwrap()
+			x.value.try_into().unwrap()
 		}
 	}
 }
@@ -128,12 +135,14 @@ impl<const N: u32> From<Bits<N, true>> for Bits<N, false>
 		// Reinterpret the bits as signed
 		if x.value < 0
 		{
-			let remainder = (-Bits::<N, true>::min().value) + x.value + 1;
-			Self::new(Bits::<N, true>::max().value + remainder).unwrap()
+			let remainder = (-Bits::<N, true>::get_min().value) + x.value + 1;
+			(Bits::<N, true>::get_max().value + remainder)
+				.try_into()
+				.unwrap()
 		}
 		else
 		{
-			Self::new(x.value).unwrap()
+			(x.value).try_into().unwrap()
 		}
 	}
 }
@@ -149,7 +158,7 @@ impl From<bool> for Bits<1, false>
 {
 	fn from(x: bool) -> Self
 	{
-		Self::new(x as i32).unwrap()
+		(x as i32).try_into().unwrap()
 	}
 }
 
@@ -175,7 +184,7 @@ impl From<Alu2OutputVariant> for Bits<3, false>
 	fn from(x: Alu2OutputVariant) -> Self
 	{
 		use Alu2OutputVariant::*;
-		Self::new(match x
+		(match x
 		{
 			High => 0b001,
 			Low => 0b010,
@@ -184,6 +193,7 @@ impl From<Alu2OutputVariant> for Bits<3, false>
 			NextHigh => 0b101,
 			NextLow => 0b110,
 		})
+		.try_into()
 		.unwrap()
 	}
 }
@@ -235,7 +245,7 @@ impl<
 				.value
 				.bitand(Bits::<N2, false>::saturated().value.bitxor(-1))
 				>> N2;
-			if high_value >= Bits::<N1, SIGNED1>::max().value
+			if high_value >= Bits::<N1, SIGNED1>::get_max().value
 			{
 				// Must be negative
 				high_value += Bits::<N1, false>::saturated().value.bitxor(-1);
@@ -246,6 +256,100 @@ impl<
 		{
 			Err(())
 		}
+	}
+}
+
+/// Disallows a specific value from being accepted.
+///
+/// Otherwise, behaves like `B`.
+#[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
+pub struct Exclude<B: BitValue, const EXCLUDED: i32>(B);
+impl<B: BitValue, const EXCLUDED: i32> TryFrom<i32> for Exclude<B, EXCLUDED>
+{
+	type Error = ();
+
+	fn try_from(value: i32) -> Result<Self, Self::Error>
+	{
+		if value != EXCLUDED
+		{
+			value.try_into().map(|v| Self(v))
+		}
+		else
+		{
+			Err(())
+		}
+	}
+}
+impl<B: BitValue, const EXCLUDED: i32> BitValue for Exclude<B, EXCLUDED>
+{
+	const SIGNED: bool = false;
+	const SIZE: u32 = 0;
+
+	fn value(&self) -> i32
+	{
+		self.0.value()
+	}
+
+	fn get_max() -> Self
+	{
+		let inner_max = B::get_max();
+		let mut max = inner_max.value();
+
+		let mut result = if EXCLUDED == inner_max.value()
+		{
+			Err(())
+		}
+		else
+		{
+			Ok(inner_max)
+		};
+		while let Err(_) = result
+		{
+			max -= 1;
+			result = max.try_into();
+		}
+		result
+			.map(|v| Self(v))
+			.unwrap_or_else(|_| panic!("Couldn't find a max"))
+	}
+
+	fn get_min() -> Self
+	{
+		let inner_min = B::get_min();
+		let mut min = inner_min.value();
+
+		let mut result = if EXCLUDED == inner_min.value()
+		{
+			Err(())
+		}
+		else
+		{
+			Ok(inner_min)
+		};
+		while let Err(_) = result
+		{
+			min += 1;
+			result = min.try_into();
+		}
+		result
+			.map(|v| Self(v))
+			.unwrap_or_else(|_| panic!("Couldn't find a max"))
+	}
+}
+impl<const N: u32, const SIGNED: bool, const EXCLUDED: i32> From<Exclude<Bits<N, SIGNED>, EXCLUDED>>
+	for Bits<N, SIGNED>
+{
+	fn from(value: Exclude<Bits<N, SIGNED>, EXCLUDED>) -> Self
+	{
+		value.0
+	}
+}
+impl<const N: u32, const SIGNED: bool, const EXCLUDED: i32> From<Bits<N, SIGNED>>
+	for Exclude<Bits<N, SIGNED>, EXCLUDED>
+{
+	fn from(value: Bits<N, SIGNED>) -> Self
+	{
+		value.value().try_into().unwrap()
 	}
 }
 
@@ -380,5 +484,5 @@ pub enum Instruction
 	Nop,
 
 	/// The request instruction.
-	Request(Bits<8, false>),
+	Request(Exclude<Bits<8, false>, 0>),
 }

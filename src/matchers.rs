@@ -1,4 +1,7 @@
-use crate::instructions::{Alu2OutputVariant, Bits};
+use crate::{
+	instructions::{Alu2OutputVariant, Bits},
+	BitValue, Exclude,
+};
 use duplicate::duplicate;
 use std::{
 	borrow::Borrow,
@@ -46,8 +49,8 @@ impl<'a> ParseErrorType<'a>
 	{
 		ParseErrorType::OutOfBoundValue(
 			value,
-			Bits::<SIZE, SIGNED>::min().value() as isize,
-			Bits::<SIZE, SIGNED>::max().value() as isize,
+			Bits::<SIZE, SIGNED>::get_min().value() as isize,
+			Bits::<SIZE, SIGNED>::get_min().value() as isize,
 		)
 	}
 }
@@ -300,7 +303,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		i32::parse(tokens, f).and_then(|(value, consumed, bytes)| {
-			Self::new(value).map_or(
+			value.try_into().map_or(
 				Err(ParseError {
 					start_token: 0,
 					start_idx: 0,
@@ -319,10 +322,9 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
 	}
 }
 
-pub struct NonZeroBits<const SIZE: u32, const SIGNED: bool>(Bits<SIZE, SIGNED>);
-impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for NonZeroBits<SIZE, SIGNED>
+impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Exclude<Bits<SIZE, SIGNED>, 0i32>
 {
-	type Internal = <Bits<SIZE, SIGNED> as Parser<'a>>::Internal;
+	type Internal = Self;
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
@@ -333,27 +335,30 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for NonZeroBits<SIZE, S
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		Bits::<SIZE, SIGNED>::parse(tokens, f).and_then(|(bits, consumed, bytes)| {
-			if bits != Bits::zero()
-			{
-				Ok((bits, consumed, bytes))
-			}
-			else
-			{
-				Err(ParseError {
-					start_token: 0,
-					start_idx: 0,
-					end_token: consumed,
-					end_idx: bytes,
-					err_type: ParseErrorType::OutOfBoundValue(0, 1, 255),
-				})
-			}
-		})
+		Bits::<SIZE, SIGNED>::parse(tokens, f)
+			.and_then(|(bits, consumed, bytes)| {
+				if bits != Bits::zero()
+				{
+					Ok((bits, consumed, bytes))
+				}
+				else
+				{
+					Err(ParseError {
+						start_token: 0,
+						start_idx: 0,
+						end_token: consumed,
+						end_idx: bytes,
+						err_type: ParseErrorType::OutOfBoundValue(0, 1, 255),
+					})
+				}
+			})
+			.map(|(bits, consumed, bytes)| (bits.into(), consumed, bytes))
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		Bits::<SIZE, SIGNED>::print(internal, out)
+		let bits = internal.value().try_into().unwrap();
+		Bits::<SIZE, SIGNED>::print(&bits, out)
 	}
 }
 
@@ -498,8 +503,8 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 				})
 			})
 			.and_then(|(value, consumed, bytes)| {
-				Bits::<SIZE, SIGNED>::new(value).map_or_else(
-					|| {
+				value.try_into().map_or_else(
+					|_| {
 						Err(ParseError {
 							start_token: 0,
 							start_idx: 0,
@@ -536,8 +541,8 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 		let f = f.borrow();
 		Then::<Arrow, u16>::parse::<_, F, _>(tokens.clone(), f)
 			.and_then(|(((), value), consumed, bytes)| {
-				Bits::new(value as i32).map_or_else(
-					|| {
+				(value as i32).try_into().map_or_else(
+					|_| {
 						Err(ParseError::from_token(
 							tokens.clone().next().unwrap().split_at(2).1,
 							consumed,
@@ -611,8 +616,9 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 					next_branch_to = !next_branch_to;
 				}
 				result.and_then(|((_, offset), consumed, bytes)| {
-					Bits::new(offset)
-						.ok_or({
+					offset
+						.try_into()
+						.or({
 							err.replace_if_further(&ParseError {
 								start_token: 0,
 								start_idx: 0,
@@ -620,7 +626,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								end_idx: bytes,
 								err_type: ParseErrorType::from_bits::<SIZE, false>(offset as isize),
 							});
-							err
+							Err(err)
 						})
 						.map(|b| (b, consumed, bytes))
 				})
@@ -1199,7 +1205,7 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 			// Ensure right size for offset
 			off1.value()
 		};
-		Bits::new(value).map_or(
+		value.try_into().map_or(
 			Err(ParseError {
 				start_token: 0,
 				start_idx: 0,
@@ -1261,12 +1267,12 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 								v >>= 1;
 								pow += 1;
 							}
-							Bits::new(pow)
-								.ok_or(ParseError::from_token(
+							pow.try_into()
+								.or(Err(ParseError::from_token(
 									value_str,
 									0,
 									ParseErrorType::from_bits::<SIZE, false>(pow as isize),
-								))
+								)))
 								.map(|b| (b, 0, value_str.len()))
 						}
 						else
@@ -1374,7 +1380,7 @@ impl<'a> Parser<'a> for VecLength<'a>
 					.and_then(|t| {
 						if t.starts_with('_')
 						{
-							Ok((Bits::max(), 0, 1))
+							Ok((Bits::get_min(), 0, 1))
 						}
 						else
 						{

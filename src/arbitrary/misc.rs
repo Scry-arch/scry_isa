@@ -1,6 +1,7 @@
-use crate::{arbitrary::*, Bits, Instruction};
+use crate::{arbitrary::*, BitValue, Bits, Instruction};
 use duplicate::duplicate_item;
 use quickcheck::{empty_shrinker, Arbitrary, Gen};
+use std::convert::TryInto;
 
 impl<const N: u32, const SIGNED: bool> Arbitrary for Bits<N, SIGNED>
 {
@@ -9,15 +10,15 @@ impl<const N: u32, const SIGNED: bool> Arbitrary for Bits<N, SIGNED>
 		Bits {
 			value: gen_range(
 				g,
-				Bits::<N, SIGNED>::min().value,
-				Bits::<N, SIGNED>::max().value + 1,
+				Bits::<N, SIGNED>::get_min().value,
+				Bits::<N, SIGNED>::get_max().value + 1,
 			),
 		}
 	}
 
 	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
 	{
-		Box::new(self.value.shrink().map(|v| Bits::new(v).unwrap()))
+		Box::new(self.value.shrink().map(|v| v.try_into().unwrap()))
 	}
 }
 

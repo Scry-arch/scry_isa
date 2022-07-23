@@ -1,10 +1,10 @@
 use crate::{
-	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, Bits, CallVariant, Instruction,
+	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, BitValue, CallVariant, Instruction,
 	Parser, StackControlVariant,
 };
 use duplicate::duplicate;
 use quickcheck::{Arbitrary, Gen};
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, convert::TryInto, fmt::Debug, marker::PhantomData};
 
 impl Arbitrary for Instruction
 {
@@ -51,7 +51,7 @@ impl Arbitrary for Instruction
 			{
 				// No zero
 				let x = (u8::arbitrary(g) % 255) + 1;
-				Request(Bits::new(x as i32).unwrap())
+				Request((x as i32).try_into().unwrap())
 			},
 			14 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
