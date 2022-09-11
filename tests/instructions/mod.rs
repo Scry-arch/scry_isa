@@ -24,6 +24,12 @@ where
 	let mut buff = String::new();
 	Instruction::print(&instr, &mut buff).unwrap();
 	assert_eq!(buff, expected_asm, "From: \"{}\"", source_asm);
+
+	// Check that if we encode the instruction, we decode it to the same instruction
+	let encoded = instr.encode();
+	let decoded = Instruction::decode(encoded);
+	assert_eq!(instr, decoded, "Error in encode/decode.");
+
 	if let Some(expected_bin) = expected_bin
 	{
 		let encoded = instr.encode();
@@ -39,21 +45,24 @@ where
 
 /// Tests the parsing of specific assembly instruction.
 ///
-/// An instruction is given in a string optionally followed by "=>" and another
-/// string.
-/// If the string is alone (no "=>" etc) then it is parsed and printed.
-/// It then checks whether the original and printed string are identical.
+/// An instruction is given in a string which is parsed into an instruction.
+/// The instruction is then printed to check that it prints to the original
+/// string. It is also encoded into a u16, which is then decoded to check the
+/// resulting instruction is the same as the original.
 ///
-/// If the string is followed by another string (with "=>" between) it is parsed
-/// and printed. It then checks that the printed string is identical to the
-/// second given string. This is used to check the alternate assembly forms of
-/// an instruction. The first string is therefore the alternate form and the
-/// second is the default one.
+/// The string can optionally be followed by "=>" and another string.
+/// This checks that the printed string is identical to the second given string
+/// when printed from the instruction. This is used to check the alternate
+/// assembly forms of an instruction. The first string is therefore the
+/// alternate form and the second is the default one.
 ///
 /// The instruction can also be preceded by a parenthesis group containing first
 /// an integer representing the address of the instruction, then any number of
 /// 'symbol:address' pairs representing the addresses of symbols in the
 /// instruction.
+///
+/// All the previous can optionally be followed by ":" and a u16 value.
+/// If so, checks that encoding the instruction results in the exact same value.
 macro_rules! test_assembly {
 	(
 		$(

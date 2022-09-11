@@ -1401,6 +1401,69 @@ macro_rules! impl_encoding {
 	};
 
     (
+        // Finished expanding group state names. Transition to final
+        @expand_group_states [
+            $([
+                [$($group_state_name:tt)+]
+                {$($group_state_args_id:ident : $group_state_args_size:literal,)*}
+                [$($group_pattern:literal)+]
+                [$group_variant:tt []]
+            ])+
+        ]
+        @fsm [$fsm_name:ident $($fsm_rest:tt)*]
+        @states [ $($states_rest:tt)* ]
+        @transitions [ $($transitions_rest:tt)* ]
+        @finals [ $($final_rest:tt)* ]
+        @build_fsm
+        [[$($from:tt)+] {$($from_args_id:ident : $from_args_size:literal,)*}] [
+            [$wildcard_id:ident : $wildcard_size:literal] [ $variant:tt [] ]
+        ]
+        $($rest:tt)*
+    ) => {
+        impl_encoding! {
+            @fsm [$fsm_name $($fsm_rest)*]
+            @states [
+                $($states_rest)*
+                [
+                    [ $($from)+ _ $fsm_name _Invalid]{}
+                ]
+            ]
+            @transitions [
+                $($transitions_rest)*
+                [
+                    [[$($from)+] {$($from_args_id : $from_args_size,)*}]
+                    [   [$($from)+ _ $wildcard_id]
+                        {$($from_args_id : $from_args_size,)* $wildcard_id : $wildcard_size,}
+                    ]
+                    [$wildcard_id : $wildcard_size]
+                    [ $fsm_name _ $($from)+ ]
+                    [ $([$($group_state_name)+])+ ]
+                ]
+            ]
+            @finals [
+                $($final_rest)*
+                [   [$($from)+ _ $wildcard_id]
+                    {$($from_args_id : $from_args_size,)* $wildcard_id : $wildcard_size,} :
+                    $variant
+                ]
+                $([ [$($group_state_name)+]
+                    {$($group_state_args_id : $group_state_args_size,)* } :
+                    $group_variant
+                ])+
+            ]
+            $($rest)*
+        }
+        paste::paste!{
+        impl_encoding!{
+            // #1 fsm name #2 name of decoded type #3 variant (in decoded type) to use upon failure
+            // #4 which bit (0=most significant) to start decoding from
+            @init [[< $fsm_name _ $($from)+>] $fsm_name (|_|[< $($from)+ _ $fsm_name _Invalid>]{})]
+            $(([< $($group_state_name)+ >]())[$($group_pattern)+])+
+        }}
+    };
+
+    (
+        // Finished expanding group state names. Transition
         @expand_group_states [
             $([
                 [$($group_state_name:tt)+]
@@ -1700,15 +1763,18 @@ macro_rules! impl_encoding {
             [< $($from)+ >]($($from_args_id,)*) => {
                 let fsm_result = [< $($group_fsm_name)+ >]::decode_from($variant, $done);
 
-                (if let [< $($from)+ _ $fsm_name _Invalid >]{} = fsm_result {
-                    let extracted = (
-                        $extract(<Bits<$wildcard_size, false>>::SIZE)
-                    ).try_into().unwrap();
-                    [< $($to)+ >]($($from_args_id,)* extracted )
-                } else {
-                    fsm_result
-                },
-                $done + <Bits<$wildcard_size, false>>::SIZE)
+                (
+                    if let [< $($from)+ _ $fsm_name _Invalid >]{} = fsm_result
+                    {
+                        let extracted = (
+                            $extract(<Bits<$wildcard_size, false>>::SIZE)
+                        ).try_into().unwrap();
+                        [< $($to)+ >]($($from_args_id,)* extracted )
+                    } else {
+                        fsm_result
+                    },
+                    $done + <Bits<$wildcard_size, false>>::SIZE
+                )
             }
         }
     };
@@ -1987,11 +2053,11 @@ map_mnemonics! {
 	{
 		() = ()
 	}
-	"nop" (Nop) [ 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 ]
+	"nop" (Nop) [ 0 0 0 1 0 0 0 1 [0 0 0 0 0 0 0 0]]
 	{
 		() = ()
 	}
-	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8] ]
+	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8]]
 	{
 		v <= Implicit<Exclude<Bits<8, false>,0>,255> => (*v)
 	}
