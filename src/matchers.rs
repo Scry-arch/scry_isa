@@ -1,12 +1,10 @@
-use crate::{
-	instructions::{Alu2OutputVariant, Bits},
-	BitValue, Exclude,
-};
+use crate::{Alu2OutputVariant, BitValue, Bits, BitsDyn, Exclude};
 use duplicate::duplicate;
 use std::{
 	borrow::Borrow,
 	convert::{TryFrom, TryInto},
 	fmt::{Debug, Write},
+	iter::once,
 	marker::PhantomData,
 };
 
@@ -50,7 +48,7 @@ impl<'a> ParseErrorType<'a>
 		ParseErrorType::OutOfBoundValue(
 			value,
 			Bits::<SIZE, SIGNED>::get_min().value() as isize,
-			Bits::<SIZE, SIGNED>::get_min().value() as isize,
+			Bits::<SIZE, SIGNED>::get_max().value() as isize,
 		)
 	}
 }
@@ -868,6 +866,8 @@ duplicate! {
 		name	text;
 		[High]	["High"];
 		[Low]	["Low"];
+		[Int]	["Int"];
+		[Uint]	["Uint"];
 	]
 	pub struct name();
 	impl HasWord for name
@@ -1339,6 +1339,70 @@ impl<'a> Parser<'a> for IntSize<'a>
 	{
 		out.write_char(if internal.0 { 'i' } else { 'u' })?;
 		Pow2::print(&internal.1, out)
+	}
+}
+
+pub struct TypedConst<'a, const SIZE: u32>(PhantomData<&'a ()>);
+impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
+{
+	type Internal = BitsDyn<SIZE>;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Option<&str>, &str) -> i32,
+	{
+		tokens
+			.next()
+			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
+			.and_then(|token: &str| {
+				if token.ends_with("i0")
+				{
+					Ok(true)
+				}
+				else if token.ends_with("u0")
+				{
+					Ok(false)
+				}
+				else
+				{
+					Err(ParseError::from_token(
+						token,
+						0,
+						ParseErrorType::UnexpectedChars("integer scalar type and size"),
+					))
+				}
+				.and_then(|signed| {
+					if signed
+					{
+						Bits::<SIZE, true>::parse(once(&token[..token.len() - 2]), f)
+							.map(|(b, _, bytes)| (b.into(), 0, bytes + 2))
+					}
+					else
+					{
+						Bits::<SIZE, false>::parse(once(&token[..token.len() - 2]), f)
+							.map(|(b, _, bytes)| (b.into(), 0, bytes + 2))
+					}
+				})
+			})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		if let Ok(bits) = internal.clone().try_into()
+		{
+			Bits::<SIZE, true>::print(&bits, out)?;
+			out.write_str("i0")
+		}
+		else
+		{
+			Bits::<SIZE, false>::print(&internal.clone().try_into().unwrap(), out)?;
+			out.write_str("u0")
+		}
 	}
 }
 

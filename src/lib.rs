@@ -5,8 +5,10 @@
 /// `quickcheck`.
 pub mod arbitrary;
 mod assembly;
+mod bits;
 mod instructions;
 mod matchers;
 
+pub use bits::*;
 pub use instructions::*;
 pub use matchers::*;

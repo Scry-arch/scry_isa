@@ -1,4 +1,4 @@
-use crate::{arbitrary::*, BitValue, Bits, Instruction};
+use crate::{arbitrary::*, BitValue, Bits, BitsDyn, Instruction};
 use duplicate::duplicate_item;
 use quickcheck::{empty_shrinker, Arbitrary, Gen};
 use std::convert::TryInto;
@@ -21,6 +21,41 @@ impl<const N: u32, const SIGNED: bool> Arbitrary for Bits<N, SIGNED>
 		Box::new(self.value.shrink().map(|v| v.try_into().unwrap()))
 	}
 }
+impl<const N: u32> Arbitrary for BitsDyn<N>
+{
+	fn arbitrary(g: &mut Gen) -> Self
+	{
+		if bool::arbitrary(g)
+		{
+			Bits::<N, true>::arbitrary(g).into()
+		}
+		else
+		{
+			Bits::<N, false>::arbitrary(g).into()
+		}
+	}
+
+	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
+	{
+		let mut result: Vec<Self> = Vec::new();
+		if self.is_signed()
+		{
+			let bits: Bits<N, true> = self.clone().try_into().unwrap();
+			result.extend(bits.shrink().map(|b| Self::from(b)));
+
+			// Add an unsigned version too
+			let bits: Bits<N, false> = bits.into();
+			result.push(bits.into());
+		}
+		else
+		{
+			let bits: Bits<N, false> = self.clone().try_into().unwrap();
+			result.extend(bits.shrink().map(|b| Self::from(b)));
+		}
+
+		Box::new(result.into_iter())
+	}
+}
 
 /// Returns the indices of offset operands, e.g., the 1 in "jmp x"
 pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
@@ -32,7 +67,7 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
-		| PickI(..) | Load(..) | Store | Request(..) | Invalid(..) | Nop => [].iter(),
+		| PickI(..) | Load(..) | Store | Request(..) | Invalid(..) | Nop | Constant(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -78,7 +113,10 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..) | Call(..) | Load(..) | Store | Request(..) | Invalid(..) | Nop => vec![],
+		Jump(..) | Call(..) | Load(..) | Store | Request(..) | Invalid(..) | Nop | Constant(..) =>
+		{
+			vec![]
+		},
 	}
 	.into_iter()
 }

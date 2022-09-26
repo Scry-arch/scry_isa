@@ -1,4 +1,4 @@
-use crate::{instructions::*, matchers::*};
+use crate::*;
 use lazy_static::lazy_static;
 use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
 
@@ -553,7 +553,7 @@ macro_rules! map_mnemonics_impl {
 /// In the following example, V1 is encoded as 0b010 (2), V2 as 0b011 (3) and V3
 /// as 0b100 (4):
 ///
-/// ```no_run
+/// ```no_a_doc_test
 /// (V1)    [0 1 0]
 /// (V2)    [0 1 1]
 /// (V3)    [1 0 0]
@@ -567,7 +567,7 @@ macro_rules! map_mnemonics_impl {
 ///
 /// An example invocation could be:
 ///
-/// ```no_run
+/// ```no_a_doc_test
 /// (V1(wild1, wild2))          [0 1 0 [wild1:7] [wild2:6] ]
 /// (V2(wild1, wild2, wild3))   [0 1 1 [wild1:5] [wild2:5] [wild3:1] ]
 /// (V3(wild2, wild2))          [1 0 0 [wild1:5] [wild2:5] ]
@@ -577,7 +577,7 @@ macro_rules! map_mnemonics_impl {
 /// subsequent variants must not use wildcard identifiers and numbers.
 /// Instead they must use "_" for both. E.g.:
 ///
-/// ```no_run
+/// ```no_a_doc_test
 /// (V1(wild1, wild2))   [0 1 1 [wild1:5] 0 0 0 [wild2:5] ]
 /// (V2(wild1, wild2))   [0 1 1 [_:_]     0 0 1 [wild1:2] [wild2:3] ]
 /// ```
@@ -593,7 +593,7 @@ macro_rules! map_mnemonics_impl {
 /// In the following example, V1 is decoded 0b001 (2), V2 is decoded for 0b010
 /// (4) and V3 otherwise.
 ///
-/// ```no_run
+/// ```no_a_doc_test
 /// (V1)        [0 [0 1] ]      // 0b001
 /// (V2)        [0 [1 0] ]      // 0b010
 /// (V3(wild))  [0 [wild:2] ]   // 0b000 or 0b011
@@ -604,7 +604,7 @@ macro_rules! map_mnemonics_impl {
 /// one variant for a specific bit, a wildcard/groups cannot be defined for
 /// another variant's same bit:
 ///
-/// ```no_run
+/// ```no_a_doc_test
 /// (V1(wild1, wild2))   [0 1 1 [wild1:5] 0 0 0 [wild2:5] ]
 /// (V1(wild1, wild2))   [0 1 1 [_:_]     0 1 [wild1:2] [wild2:3] ]
 /// // Error V1 has "0" but V2 has wildcard   ^^^^^^^^^
@@ -612,7 +612,7 @@ macro_rules! map_mnemonics_impl {
 ///
 /// The resulting encoder/decoder has the following functions:
 ///
-/// ```no_run
+/// ```no_a_doc_test
 /// /// Create a new FSM instance for encoding the given variant.
 /// /// Returns `None` if the given variant cannot be encoded by this FSM.
 /// fn new_encode(to_enc: &v) -> Option<FSM>;
@@ -2060,5 +2060,10 @@ map_mnemonics! {
 	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8]]
 	{
 		v <= Implicit<Exclude<Bits<8, false>,0>,255> => (*v)
+	}
+	"const"
+	(Constant(imm)) [ 0 0 0 0 0 0 1 [imm:9] ]
+	{
+		imm <= TypedConst<8> => (*imm)
 	}
 }

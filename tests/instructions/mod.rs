@@ -118,6 +118,7 @@ macro_rules! test_assembly {
 mod alu;
 mod alu2;
 mod cap;
+mod const_ext;
 mod dup;
 mod echo;
 mod invalid;

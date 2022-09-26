@@ -53,7 +53,9 @@ impl Arbitrary for Instruction
 				let x = (u8::arbitrary(g) % 255) + 1;
 				Request((x as i32).try_into().unwrap())
 			},
-			14 => Invalid(0),
+			14 => Constant(Arbitrary::arbitrary(g)),
+
+			15 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}

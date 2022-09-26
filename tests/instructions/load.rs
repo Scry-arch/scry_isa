@@ -13,6 +13,4 @@ test_assembly! {
 	"ld i16"
 	"ld i32"
 	"ld i64"
-	"ld u1"
-	"ld i64"
 }
