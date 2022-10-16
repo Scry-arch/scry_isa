@@ -352,7 +352,7 @@ impl<const N: u32, const SIGNED: bool, const EXCLUDED: i32> From<Bits<N, SIGNED>
 	}
 }
 
-/// Like `Bits` except the signedness is not known
+/// Like `Bits` except the signedness is not statically known
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
 pub struct BitsDyn<const N: u32>(bool, Bits<N, false>);
 impl<const N: u32> BitsDyn<N>

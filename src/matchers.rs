@@ -1325,7 +1325,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 					))
 				}
 				.and_then(|signed| {
-					Pow2::<3>::parse(Some(&token[1..]).into_iter(), f)
+					Bits::<3, false>::parse(Some(&token[1..]).into_iter(), f)
 						.map_err(|mut err| {
 							err.start_idx += 1;
 							err
@@ -1338,7 +1338,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
 		out.write_char(if internal.0 { 'i' } else { 'u' })?;
-		Pow2::print(&internal.1, out)
+		Bits::<3, false>::print(&internal.1, out)
 	}
 }
 

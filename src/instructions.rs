@@ -125,7 +125,7 @@ pub enum Instruction
 	/// 0. Whether the loaded integer is signed or unsigned. `true` is signed.
 	/// 0. The scalar size to load as a power of two. I.e. 0 loads 1 byte, 1
 	/// loads 2 bytes, 2 loads 4 bytes, etc.
-	Load(bool, Bits<3, false>),
+	Load(bool, Bits<3, false>, Bits<5, false>),
 
 	/// The store instruction.
 	Store,

@@ -44,7 +44,14 @@ impl Arbitrary for Instruction
 			7 => Capture(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			8 => Pick(Arbitrary::arbitrary(g)),
 			9 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			10 => Load(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			10 =>
+			{
+				Load(
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+				)
+			},
 			11 => Store,
 			12 => Nop,
 			13 =>
