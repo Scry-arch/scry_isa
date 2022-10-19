@@ -1,9 +1,9 @@
 test_assembly! {
-	"const 0u0"
-	"const 0i0"
-	"const 1u0"
-	"const 1i0"
-	"const -1i0"
-	"const 255u0"
-	"const -127i0"
+	"const u0, 0"
+	"const i0, 0"
+	"const u0, 1"
+	"const i0, 1"
+	"const i0, -1"
+	"const u0, 255"
+	"const i0, -127"
 }

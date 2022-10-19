@@ -4,7 +4,6 @@ use std::{
 	borrow::Borrow,
 	convert::{TryFrom, TryInto},
 	fmt::{Debug, Write},
-	iter::once,
 	marker::PhantomData,
 };
 
@@ -1356,52 +1355,104 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		tokens
-			.next()
-			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
-			.and_then(|token: &str| {
-				if token.ends_with("i0")
+		IntSize::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
+			|((signed, pow2), consumed, bytes)| {
+				assert_eq!(consumed, 0);
+				if SIZE >= 2u32.pow(pow2.value as u32)
 				{
-					Ok(true)
-				}
-				else if token.ends_with("u0")
-				{
-					Ok(false)
-				}
-				else
-				{
-					Err(ParseError::from_token(
-						token,
-						0,
-						ParseErrorType::UnexpectedChars("integer scalar type and size"),
-					))
-				}
-				.and_then(|signed| {
-					if signed
+					let consumed_tok = tokens.clone().next().unwrap().len() == bytes;
+					let next_first = if consumed_tok
 					{
-						Bits::<SIZE, true>::parse(once(&token[..token.len() - 2]), f)
-							.map(|(b, _, bytes)| (b.into(), 0, bytes + 2))
+						tokens.nth(1)
 					}
 					else
 					{
-						Bits::<SIZE, false>::parse(once(&token[..token.len() - 2]), f)
-							.map(|(b, _, bytes)| (b.into(), 0, bytes + 2))
+						Some(&tokens.next().unwrap()[bytes..])
+					};
+					let tokens = next_first.into_iter().chain(tokens);
+
+					if signed
+					{
+						Then::<Comma, Bits<SIZE, true>>::parse(tokens, f).map(
+							|((_, b), consumed2, bytes2)| {
+								(
+									b.into(),
+									consumed2 + consumed_tok as usize,
+									if consumed2 == 0 { bytes } else { 0 } + bytes2,
+								)
+							},
+						)
 					}
-				})
-			})
+					else
+					{
+						Then::<Comma, Bits<SIZE, false>>::parse(tokens, f).map(
+							|((_, b), consumed2, bytes2)| {
+								(
+									b.into(),
+									consumed2 + consumed_tok as usize,
+									if consumed2 == 0 { bytes } else { 0 } + bytes2,
+								)
+							},
+						)
+					}
+					.map_err(|err| {
+						ParseError {
+							start_token: err.start_token + consumed_tok as usize,
+							start_idx: if !consumed_tok && err.start_token == 0
+							{
+								err.start_idx + bytes
+							}
+							else
+							{
+								err.start_idx
+							},
+							end_token: err.end_token + consumed_tok as usize,
+							end_idx: if !consumed_tok && err.start_token == 0
+							{
+								err.end_idx + bytes
+							}
+							else
+							{
+								err.end_idx
+							},
+							err_type: err.err_type,
+						}
+					})
+				}
+				else
+				{
+					Err(ParseError {
+						start_token: 0,
+						start_idx: 1,
+						end_token: 0,
+						end_idx: bytes,
+						// TODO: should handle higher powers of 2
+						err_type: ParseErrorType::OutOfBoundValue(pow2.value as isize, 0, 0),
+					})
+				}
+			},
+		)
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
+		assert!(SIZE >= 8); // TODO: support higher bit lengths
 		if let Ok(bits) = internal.clone().try_into()
 		{
-			Bits::<SIZE, true>::print(&bits, out)?;
-			out.write_str("i0")
+			CommaBetween::<IntSize, Bits<SIZE, true>>::print(
+				&((true, 0i32.try_into().unwrap()), bits),
+				out,
+			)
 		}
 		else
 		{
-			Bits::<SIZE, false>::print(&internal.clone().try_into().unwrap(), out)?;
-			out.write_str("u0")
+			CommaBetween::<IntSize, Bits<SIZE, false>>::print(
+				&(
+					(false, 0i32.try_into().unwrap()),
+					internal.clone().try_into().unwrap(),
+				),
+				out,
+			)
 		}
 	}
 }
