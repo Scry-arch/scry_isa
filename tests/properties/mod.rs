@@ -152,11 +152,31 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 		_ => (),
 	}
 
-	let (_, consumed, bytes) = Instruction::parse(chained, resolver).unwrap();
+	let (_, consumed) = Instruction::parse(chained, resolver).unwrap();
 
-	TestResult::from_bool(
-		(consumed == (instr_tokens.len() - 1)) && (bytes == instr_tokens.last().unwrap().len()),
-	)
+	if consumed.tokens == (instr_tokens.len() - 1)
+	{
+		if consumed.chars != instr_tokens.last().unwrap().len()
+		{
+			TestResult::error(format!(
+				"Unexpected number of characters consumed (actual != expected): {} != {}",
+				consumed.chars,
+				instr_tokens.last().unwrap().len()
+			))
+		}
+		else
+		{
+			TestResult::passed()
+		}
+	}
+	else
+	{
+		TestResult::error(format!(
+			"Unexpected number of tokens consumed (actual != expected): {} != {}",
+			consumed.tokens,
+			instr_tokens.len() - 1
+		))
+	}
 }
 
 /// Tests that all possible separator combinations are supported for any

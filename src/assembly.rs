@@ -394,7 +394,7 @@ macro_rules! map_mnemonics_impl {
             fn parse<I,F,B>(
                 mut tokens: I,
                 f: B,
-            ) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+            ) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
             where
                 I: Iterator<Item = &'a str> + Clone,
                 B: Borrow<F>,
@@ -434,14 +434,14 @@ macro_rules! map_mnemonics_impl {
                                 err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!()))
                             };
                             $(
-                                if let Ok(($parse_result, consumed, bytes)) =
+                                if let Ok(($parse_result, consumed)) =
                                     <$parser_type>::parse::<_,F,_>(tokens.clone(), f.borrow())
                                     .or_else(|err| {
                                         furthest_error.replace_if_further(&err);
                                         Err(err)
                                     })
                                 {
-                                    Result::<(Instruction, usize, usize), ParseError>::Ok(($($instr)* , consumed, bytes))
+                                    Result::<(Instruction, CanConsume), ParseError>::Ok(($($instr)* , consumed))
                                 } else
                             )+
                             {
@@ -464,10 +464,13 @@ macro_rules! map_mnemonics_impl {
                                     * mnemonic.len()),
                             err_type: err.err_type
                         }),
-                        |(instr, consumed, bytes)| Ok((
-                            instr, consumed+((consumed_first && bytes != 0) as usize),
-                            bytes + (mnemonic.len()*(!(consumed_first && bytes != 0) as usize)))
-                        ))
+                        |(instr, consumed)| Ok((
+                            instr,
+                            CanConsume {
+                                tokens: consumed.tokens+((consumed_first && consumed.chars != 0) as usize),
+                                chars: consumed.chars + (mnemonic.len()*(!(consumed_first && consumed.chars != 0) as usize))
+                            }
+                        )))
                 }else {
                     Err(ParseError::from_token(first_token, 0, ParseErrorType::UnexpectedChars("instruction mnemonic")))
                 }
@@ -2026,9 +2029,9 @@ map_mnemonics! {
 	{
 		(output, target) <= CommaBetween<
 			Flatten<Then<
-				Flag<Keyword<High>, Keyword<Low>>,
+				Flag<High, Low>,
 				Maybe<
-					Then<Flag<Arrow, Plus>, Flag<Keyword<High>, Keyword<Low>>>
+					Then<Flag<Arrow, Plus>, Flag<High, Low>>
 				>,
 			>, _>,
 			ReferenceParser<5>

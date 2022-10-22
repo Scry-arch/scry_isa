@@ -101,7 +101,7 @@ pub struct AssemblyInstruction<I: ArbInstruction = Instruction>
 	pub instruction: Instruction,
 	/// The token index and type of a operand substitution
 	pub substitutions: Vec<(usize, OperandSubstitution)>,
-	phantom: PhantomData<I>,
+	pub phantom: PhantomData<I>,
 }
 impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 {

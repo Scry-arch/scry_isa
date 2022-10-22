@@ -1,5 +1,5 @@
 use crate::{Alu2OutputVariant, BitValue, Bits, BitsDyn, Exclude};
-use duplicate::duplicate;
+use duplicate::{duplicate, duplicate_item};
 use std::{
 	borrow::Borrow,
 	convert::{TryFrom, TryInto},
@@ -110,6 +110,158 @@ impl<'a> ParseError<'a>
 			*self = other.clone();
 		}
 	}
+
+	pub fn from_consumed(consumed: CanConsume, err_type: ParseErrorType<'a>) -> Self
+	{
+		Self {
+			start_token: 0,
+			start_idx: 0,
+			end_token: consumed.tokens,
+			end_idx: consumed.chars,
+			err_type,
+		}
+	}
+}
+
+/// Represents how many tokens and characters a parsing consumed.
+///
+/// If less than 1 token was consumed, `tokens` will be 0, wile `chars` will
+/// contain the number if characters consumed from the first token.
+///
+/// If only the first token was completely consumed, and no more characters were
+/// consumed from the following token, `tokens` will be 0, while `chars` will be
+/// the length of the first token.
+///
+/// If x tokens were fully consumed and y characters were consumed from the
+/// following token, `tokens` would be x and `chars` would be y.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CanConsume
+{
+	/// The number of complete tokens that can be consumed
+	pub tokens: usize,
+
+	// The number of bytes that can be consumed from the last token
+	pub chars: usize,
+}
+
+impl CanConsume
+{
+	pub fn none() -> Self
+	{
+		Self {
+			tokens: 0,
+			chars: 0,
+		}
+	}
+
+	pub fn chars(chars: usize) -> Self
+	{
+		Self { tokens: 0, chars }
+	}
+
+	/// Advances the given iterator according to this CanConsume.
+	/// Returns the consumed tokens/character counts and if the last token was
+	/// partially consumed, returns the remaining characters of that token
+	/// (since the whole token was consumed from the iterator but some of the
+	/// characters weren't). If the iterator is to be used for further parsin,
+	/// the returned characters should be prepended to the iterator first (as
+	/// their own token).
+	pub fn advance_iter_in_place<'a>(
+		mut self,
+		iter: &mut impl Iterator<Item = &'a str>,
+	) -> (Consumed, Option<&'a str>)
+	{
+		let token = match (self.tokens, self.chars)
+		{
+			(0, 0) => None,
+			(0, c) =>
+			{
+				let first = iter.next().unwrap();
+				assert!(c <= first.len());
+				if first.len() == c
+				{
+					self.tokens += 1;
+					self.chars = 0;
+					None
+				}
+				else
+				{
+					Some(&first[c..])
+				}
+			},
+			(t, c) =>
+			{
+				let last = iter.nth(t);
+				if c == 0
+				{
+					last
+				}
+				else
+				{
+					let last = last.unwrap();
+					assert!(last.len() > 0);
+					if last.len() == c
+					{
+						self.tokens += 1;
+						self.chars = 0;
+						None
+					}
+					else
+					{
+						Some(&last[c..])
+					}
+				}
+			},
+		};
+		(
+			Consumed {
+				tokens: self.tokens,
+				chars: self.chars,
+			},
+			token,
+		)
+	}
+
+	/// Takes an iterator and returns the iterator resulting from consuming it
+	/// using this CanConsume counts.
+	pub fn advance_iter<'a>(
+		self,
+		mut iter: impl Iterator<Item = &'a str> + Clone,
+	) -> (Consumed, impl Iterator<Item = &'a str> + Clone)
+	{
+		let (consumed, first) = self.advance_iter_in_place(&mut iter);
+		(consumed, first.into_iter().chain(iter))
+	}
+}
+
+/// Like CanConsume except has been consumed.
+/// `tokens` will be 1 if the last token was consumed completely
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Consumed
+{
+	/// The number of complete tokens consumed
+	pub tokens: usize,
+
+	// The number of bytes consumed from the last token
+	pub chars: usize,
+}
+
+impl Consumed
+{
+	pub fn then(&self, next: &CanConsume) -> CanConsume
+	{
+		CanConsume {
+			tokens: self.tokens + next.tokens,
+			chars: if next.tokens == 0
+			{
+				self.chars + next.chars
+			}
+			else
+			{
+				next.chars
+			},
+		}
+	}
 }
 
 pub trait Parser<'a>
@@ -139,7 +291,7 @@ pub trait Parser<'a>
 	/// The given iterator must produce tokens of only ASCII characters free of
 	/// whitespace. Effectively, the iterator must behave as if it was produced
 	/// by [`split_ascii_whitespace`](https://doc.rust-lang.org/std/primitive.str.html#method.split_ascii_whitespace)
-	fn parse<I, F, B>(tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -161,32 +313,6 @@ pub trait Parser<'a>
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result;
 }
 
-/// Advances the given iterator according to the given consumed and bytes
-/// values. Returns new consumed and bytes values, where if the bytes have
-/// consumed their token, it is reflected in the consumed (which is then 1
-/// higher) and the bytes are set to 0. Lastly, returns the iterator advanced to
-/// the token/bytes after the consumed.
-///
-/// Returns: (consumed, bytes, tokens)
-fn advance_iterator<'a>(
-	tokens: impl Iterator<Item = &'a str> + Clone,
-	consumed: usize,
-	bytes: usize,
-) -> (usize, usize, impl Iterator<Item = &'a str> + Clone)
-{
-	let mut tokens = tokens.skip(consumed);
-	let mut consumed_last = false;
-	let first_next = tokens.next().map(|t| t.split_at(bytes).1).filter(|t| {
-		consumed_last = t.is_empty();
-		!consumed_last
-	});
-	(
-		consumed + consumed_last as usize, // increment if bytes consumed last token
-		bytes * (!consumed_last as usize), // Set to zero if bytes consumed last token.
-		first_next.into_iter().chain(tokens),
-	)
-}
-
 impl<'a> Parser<'a> for ()
 {
 	type Internal = ();
@@ -194,13 +320,13 @@ impl<'a> Parser<'a> for ()
 	const ALONE_LEFT: bool = false;
 	const ALONE_RIGHT: bool = false;
 
-	fn parse<I, F, B>(_: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(_: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		Ok(((), 0, 0))
+		Ok(((), CanConsume::none()))
 	}
 
 	fn print_with_whitespace(_: &Self::Internal, _: bool, _: &mut impl Write) -> std::fmt::Result
@@ -214,14 +340,19 @@ impl<'a> Parser<'a> for ()
 	}
 }
 
-impl<'a> Parser<'a> for u16
+#[duplicate_item(
+	typ;
+	[u8]; [u16]; [u32]; [u64]; [u128];
+	[i8]; [i16]; [i32]; [i64]; [i128];
+)]
+impl<'a> Parser<'a> for typ
 {
-	type Internal = u16;
+	type Internal = typ;
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -230,52 +361,17 @@ impl<'a> Parser<'a> for u16
 		let value_string = tokens.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
 			// Extract digits from beginning
-			.map(|t| t.splitn(2, |c| !char::is_digit(c, 10)).next().unwrap())?;
+			.map(|t| t.splitn(2, |c| {
+				!char::is_digit(c, 10) && (typ::MIN == 0 || (c != '-'))
+			}).next().unwrap())?;
 		value_string
 			.parse()
-			.map(|v| (v, 0, value_string.len()))
+			.map(|v| (v, CanConsume::chars(value_string.len())))
 			.map_err(|_| {
 				ParseError::from_token(
 					value_string,
 					0,
 					ParseErrorType::UnexpectedChars("unsigned integer"),
-				)
-			})
-	}
-
-	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
-	{
-		out.write_str(internal.to_string().as_str())
-	}
-}
-
-impl<'a> Parser<'a> for i32
-{
-	type Internal = i32;
-
-	const ALONE_LEFT: bool = true;
-	const ALONE_RIGHT: bool = true;
-
-	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
-	where
-		I: Iterator<Item = &'a str> + Clone,
-		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
-	{
-		let value_string = tokens.next()
-			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
-			// Extract digits from beginning
-			.map(|first_token| first_token.splitn(2,
-				|c| (!char::is_digit(c, 10)) && (c != '-')).next().unwrap()
-			)?;
-		value_string
-			.parse()
-			.map(|v| (v, 0, value_string.len()))
-			.map_err(|_| {
-				ParseError::from_token(
-					value_string,
-					0,
-					ParseErrorType::UnexpectedChars("signed or unsigned integer"),
 				)
 			})
 	}
@@ -293,22 +389,19 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		i32::parse(tokens, f).and_then(|(value, consumed, bytes)| {
+		i32::parse(tokens, f).and_then(|(value, consumed)| {
 			value.try_into().map_or(
-				Err(ParseError {
-					start_token: 0,
-					start_idx: 0,
-					end_token: consumed,
-					end_idx: bytes,
-					err_type: ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
-				}),
-				|b| Ok((b, consumed, bytes)),
+				Err(ParseError::from_consumed(
+					consumed.clone(),
+					ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
+				)),
+				|b| Ok((b, consumed)),
 			)
 		})
 	}
@@ -326,30 +419,27 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Exclude<Bits<SIZE, 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Bits::<SIZE, SIGNED>::parse(tokens, f)
-			.and_then(|(bits, consumed, bytes)| {
+			.and_then(|(bits, consumed)| {
 				if bits != Bits::zero()
 				{
-					Ok((bits, consumed, bytes))
+					Ok((bits, consumed))
 				}
 				else
 				{
-					Err(ParseError {
-						start_token: 0,
-						start_idx: 0,
-						end_token: consumed,
-						end_idx: bytes,
-						err_type: ParseErrorType::OutOfBoundValue(0, 1, 255),
-					})
+					Err(ParseError::from_consumed(
+						consumed,
+						ParseErrorType::OutOfBoundValue(0, 1, 255),
+					))
 				}
 			})
-			.map(|(bits, consumed, bytes)| (bits.into(), consumed, bytes))
+			.map(|(bits, consumed)| (bits.into(), consumed))
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
@@ -371,7 +461,7 @@ where
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -379,21 +469,15 @@ where
 	{
 		match P::parse(tokens, f)
 		{
-			Ok((bits, consumed, bytes)) if bits != DEFAULT.try_into().unwrap() =>
+			Ok((bits, consumed)) if bits != DEFAULT.try_into().unwrap() => Ok((bits, consumed)),
+			Ok((_, consumed)) =>
 			{
-				Ok((bits, consumed, bytes))
+				Err(ParseError::from_consumed(
+					consumed,
+					ParseErrorType::Invalid("Must omit implicit value"),
+				))
 			},
-			Ok((_, consumed, bytes)) =>
-			{
-				Err(ParseError {
-					start_token: 0,
-					start_idx: 0,
-					end_token: consumed,
-					end_idx: bytes,
-					err_type: ParseErrorType::Invalid("Must omit implicit value"),
-				})
-			},
-			Err(_) => Ok((DEFAULT.try_into().unwrap(), 0, 0)),
+			Err(_) => Ok((DEFAULT.try_into().unwrap(), CanConsume::none())),
 		}
 	}
 
@@ -431,7 +515,7 @@ impl<'a> Parser<'a> for Symbol
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -468,7 +552,7 @@ impl<'a> Parser<'a> for Symbol
 					Ok(sym)
 				}
 			})
-			.map(|sym| (sym, 0, sym.len()))
+			.map(|sym| (sym, CanConsume::chars(sym.len())))
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
@@ -485,7 +569,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -494,23 +578,20 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 		let f = f.borrow();
 		i32::parse::<_, F, _>(tokens.clone(), f)
 			.or_else(|_| {
-				Symbol::parse::<_, F, _>(tokens, f).map(|(symbol, consumed, bytes)| {
+				Symbol::parse::<_, F, _>(tokens, f).map(|(symbol, consumed)| {
 					let difference = f(None, symbol) / 2;
-					(difference - ((difference > 0) as i32), consumed, bytes)
+					(difference - ((difference > 0) as i32), consumed)
 				})
 			})
-			.and_then(|(value, consumed, bytes)| {
+			.and_then(|(value, consumed)| {
 				value.try_into().map_or_else(
 					|_| {
-						Err(ParseError {
-							start_token: 0,
-							start_idx: 0,
-							end_token: consumed,
-							end_idx: bytes,
-							err_type: ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
-						})
+						Err(ParseError::from_consumed(
+							consumed.clone(),
+							ParseErrorType::from_bits::<SIZE, SIGNED>(value as isize),
+						))
 					},
-					|b| Ok((b, consumed, bytes)),
+					|b| Ok((b, consumed.clone())),
 				)
 			})
 	}
@@ -529,7 +610,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -537,29 +618,29 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 	{
 		let f = f.borrow();
 		Then::<Arrow, u16>::parse::<_, F, _>(tokens.clone(), f)
-			.and_then(|(((), value), consumed, bytes)| {
+			.and_then(|(((), value), consumed)| {
 				(value as i32).try_into().map_or_else(
 					|_| {
 						Err(ParseError::from_token(
 							tokens.clone().next().unwrap().split_at(2).1,
-							consumed,
+							consumed.tokens,
 							ParseErrorType::from_bits::<SIZE, false>(value as isize),
 						))
 					},
-					|b| Ok((b, consumed, bytes)),
+					|b| Ok((b, consumed.clone())),
 				)
 			})
 			.or_else(|mut err| {
 				let mut result = Then::<Arrow, Symbol>::parse::<_, F, _>(tokens.clone(), f)
-					.and_then(|(((), sym1), consumed, bytes)| {
+					.and_then(|(((), sym1), consumed)| {
 						let off1 = (f.borrow()(None, sym1) / 2) - 1;
 						if off1 < 0
 						{
 							Err(ParseError {
-								start_token: consumed,
-								start_idx: 2 * ((consumed == 0) as usize),
-								end_token: consumed,
-								end_idx: (2 * ((consumed == 0) as usize)) + sym1.len(),
+								start_token: consumed.tokens,
+								start_idx: 2 * ((consumed.tokens == 0) as usize),
+								end_token: consumed.tokens,
+								end_idx: (2 * ((consumed.tokens == 0) as usize)) + sym1.len(),
 								err_type: ParseErrorType::Invalid(
 									"must be at or follow the instruction",
 								),
@@ -567,25 +648,23 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 						}
 						else
 						{
-							Ok(((sym1, off1), consumed, bytes))
+							Ok(((sym1, off1), consumed))
 						}
 					});
 				let mut next_branch_to = true;
 				let mut next_result = result.clone();
-				while let Ok(((sym1, offset), consumed, bytes)) = next_result
+				while let Ok(((sym1, offset), consumed)) = next_result
 				{
-					result = Ok(((sym1, offset), consumed, bytes));
-					let (consumed, bytes, tokens) =
-						advance_iterator(tokens.clone(), consumed, bytes);
+					result = Ok(((sym1, offset), consumed.clone()));
 
-					next_result = Then::<Arrow, Symbol>::parse::<_, F, _>(tokens, f).and_then(
-						|(((), sym), consumed2, bytes2)| {
-							let next_consumed = consumed + consumed2;
-							let next_bytes = bytes2 + (bytes * ((consumed2 == 0) as usize));
+					let (consumed, iter) = consumed.advance_iter(tokens.clone());
+					next_result = Then::<Arrow, Symbol>::parse::<_, F, _>(iter, f).and_then(
+						|(((), sym), consumed2)| {
+							let next_consumed = consumed.then(&consumed2);
 
 							if next_branch_to
 							{
-								Ok(((sym, offset), next_consumed, next_bytes))
+								Ok(((sym, offset), next_consumed))
 							}
 							else
 							{
@@ -593,10 +672,13 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								if next_offset < 0
 								{
 									Err(ParseError {
-										start_token: next_consumed,
-										start_idx: bytes * ((consumed2 == 0) as usize),
-										end_token: next_consumed,
-										end_idx: sym.len() + (bytes * ((consumed2 == 0) as usize)),
+										start_token: next_consumed.tokens
+											+ ((next_consumed.chars > 0) as usize),
+										start_idx: consumed.chars
+											* ((consumed2.tokens == 0) as usize),
+										end_token: next_consumed.tokens,
+										end_idx: sym.len()
+											+ (consumed.chars * ((consumed2.tokens == 0) as usize)),
 										err_type: ParseErrorType::Invalid(
 											"must refer to an address higher than the previous \
 											 label in the chain",
@@ -605,34 +687,31 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								}
 								else
 								{
-									Ok(((sym, offset + next_offset), next_consumed, next_bytes))
+									Ok(((sym, offset + next_offset), next_consumed))
 								}
 							}
 						},
 					);
 					next_branch_to = !next_branch_to;
 				}
-				result.and_then(|((_, offset), consumed, bytes)| {
+				result.and_then(|((_, offset), consumed)| {
 					offset
 						.try_into()
 						.or({
-							err.replace_if_further(&ParseError {
-								start_token: 0,
-								start_idx: 0,
-								end_token: consumed,
-								end_idx: bytes,
-								err_type: ParseErrorType::from_bits::<SIZE, false>(offset as isize),
-							});
+							err.replace_if_further(&ParseError::from_consumed(
+								consumed.clone(),
+								ParseErrorType::from_bits::<SIZE, false>(offset as isize),
+							));
 							Err(err)
 						})
-						.map(|b| (b, consumed, bytes))
+						.map(|b| (b, consumed))
 				})
 			})
 			.or_else(|err| {
 				Arrow::parse::<_, F, _>(tokens.clone(), f)
-					.and_then(|(_, consumed, bytes)| Ok((Bits::zero(), consumed, bytes)))
+					.and_then(|(_, consumed)| Ok((Bits::zero(), consumed)))
 					.map_err(|_| err)
-			}) //.and_then(|r| Ok(dbg!(r)))
+			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
@@ -650,14 +729,14 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for CommaBetween<'
 	const ALONE_LEFT: bool = P1::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P2::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Then::<P1, Then<Comma, P2>>::parse(tokens, f)
-			.map(|((left, ((), right)), tokens, bytes)| ((left, right), tokens, bytes))
+			.map(|((left, ((), right)), consumed)| ((left, right), consumed))
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
@@ -676,7 +755,7 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 	const ALONE_LEFT: bool = P1::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P2::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -685,29 +764,30 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 		let f = f.borrow();
 		match P1::parse::<_, F, _>(tokens.clone(), f)
 		{
-			Ok((result1, consumed1, bytes1)) =>
+			Ok((result1, can_consumed1)) =>
 			{
-				let (consumed, bytes, tokens) = advance_iterator(tokens, consumed1, bytes1);
+				let (consumed1, iter) = can_consumed1.clone().advance_iter(tokens.clone());
 
-				match P2::parse::<_, F, _>(tokens, f)
+				match P2::parse::<_, F, _>(iter, f)
 				{
-					// If P2 didn't consume anything, report the raw consumed/bytes of P1
-					Ok((result2, 0, 0)) => Ok(((result1, result2), consumed1, bytes1)),
-					Ok((result2, consumed2, bytes2)) =>
+					// If P2 didn't consume anything, report the raw consumed of P1
+					Ok((result2, con)) if con == CanConsume::none() =>
 					{
-						Ok((
-							(result1, result2),
-							consumed + consumed2,
-							bytes2 + (bytes * ((consumed2 == 0) as usize)),
-						))
+						Ok(((result1, result2), can_consumed1))
+					},
+					Ok((result2, consumed2)) =>
+					{
+						Ok(((result1, result2), consumed1.then(&consumed2)))
 					},
 					Err(err) =>
 					{
 						Err(ParseError {
-							start_token: consumed + err.start_token,
-							start_idx: err.start_idx + ((err.start_token == 0) as usize * bytes),
-							end_token: consumed + err.end_token,
-							end_idx: err.end_idx + ((err.end_token == 0) as usize * bytes),
+							start_token: consumed1.tokens + err.start_token,
+							start_idx: err.start_idx
+								+ ((err.start_token == 0) as usize * consumed1.chars),
+							end_token: consumed1.tokens + err.end_token,
+							end_idx: err.end_idx
+								+ ((err.end_token == 0) as usize * consumed1.chars),
 							err_type: err.err_type,
 						})
 					},
@@ -750,7 +830,7 @@ where
 	const ALONE_LEFT: bool = P1::ALONE_LEFT || P2::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P1::ALONE_RIGHT || P2::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -759,20 +839,17 @@ where
 		let f = f.borrow();
 		let err1 = match P1::parse::<_, F, _>(tokens.clone(), f)
 		{
-			Ok((result, consumed, bytes)) =>
+			Ok((result, consumed)) =>
 			{
 				match result.try_into()
 				{
-					Ok(result) => return Ok((result, consumed, bytes)),
+					Ok(result) => return Ok((result, consumed)),
 					_ =>
 					{
-						ParseError {
-							start_token: 0,
-							start_idx: 0,
-							end_token: consumed,
-							end_idx: bytes,
-							err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!())),
-						}
+						ParseError::from_consumed(
+							consumed,
+							ParseErrorType::InternalError(concat!(file!(), ':', line!())),
+						)
 					},
 				}
 			},
@@ -781,11 +858,11 @@ where
 
 		match P2::parse::<_, F, _>(tokens, f)
 		{
-			Ok((parsed, consumed, bytes)) =>
+			Ok((parsed, consumed)) =>
 			{
 				match parsed.try_into()
 				{
-					Ok(result) => Ok((result, consumed, bytes)),
+					Ok(result) => Ok((result, consumed)),
 					_ => Err(err1),
 				}
 			},
@@ -816,20 +893,24 @@ where
 	}
 }
 
-pub trait HasWord
+/// Used to parse a specific static string instead of manually implementing
+/// `Parser`.
+///
+/// To use, create an empty type and implement this trait in it, giving it the
+/// string you want to parse as `WORD`.
+/// Then use the type as the Parser.
+pub trait Keyword
 {
 	const WORD: &'static str;
 }
-
-pub struct Keyword<T: HasWord>(PhantomData<T>);
-impl<'a, T: HasWord> Parser<'a> for Keyword<T>
+impl<'a, T: Keyword> Parser<'a> for T
 {
 	type Internal = ();
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -841,7 +922,7 @@ impl<'a, T: HasWord> Parser<'a> for Keyword<T>
 			.and_then(|t| {
 				if t.starts_with(T::WORD)
 				{
-					Ok(((), 0, T::WORD.len()))
+					Ok(((), CanConsume::chars(T::WORD.len())))
 				}
 				else
 				{
@@ -869,7 +950,7 @@ duplicate! {
 		[Uint]	["Uint"];
 	]
 	pub struct name();
-	impl HasWord for name
+	impl Keyword for name
 	{
 		const WORD:&'static str = text;
 	}
@@ -892,7 +973,7 @@ duplicate! {
 		fn parse<I,F,B>(
 			mut tokens: I,
 			_: B,
-		) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+		) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 		where
 			I: Iterator<Item = &'a str> + Clone,
 			B: Borrow<F>,
@@ -901,7 +982,7 @@ duplicate! {
 			tokens.next()
 				.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
 				.and_then(|t| if t.starts_with(text) {
-					Ok(((), 0, text.len()))
+					Ok(((), CanConsume::chars(text.len())))
 				} else {
 					Err(ParseError::from_token(
 						t,
@@ -925,7 +1006,7 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a, P>
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -933,8 +1014,8 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a, P>
 	{
 		match P::parse(tokens, f)
 		{
-			Ok((result, consumed, bytes)) => Ok((Some(result), consumed, bytes)),
-			Err(_) => Ok((None, 0, 0)),
+			Ok((result, consumed)) => Ok((Some(result), consumed)),
+			Err(_) => Ok((None, CanConsume::none())),
 		}
 	}
 
@@ -979,7 +1060,7 @@ where
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -987,8 +1068,8 @@ where
 	{
 		match P::parse(tokens, f)
 		{
-			Ok((_, consumed, bytes)) => Ok((true, consumed, bytes)),
-			Err(_) => Ok((false, 0, 0)),
+			Ok((_, consumed)) => Ok((true, consumed)),
+			Err(_) => Ok((false, CanConsume::none())),
 		}
 	}
 
@@ -1019,7 +1100,7 @@ where
 	const ALONE_LEFT: bool = P1::ALONE_LEFT || P2::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P1::ALONE_RIGHT || P2::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -1027,12 +1108,12 @@ where
 	{
 		match P1::parse::<_, F, _>(tokens.clone(), f.borrow())
 		{
-			Ok((_, consumed, bytes)) => Ok((true, consumed, bytes)),
+			Ok((_, consumed)) => Ok((true, consumed)),
 			Err(err1) =>
 			{
 				match P2::parse::<_, F, _>(tokens, f)
 				{
-					Ok((_, consumed, bytes)) => Ok((false, consumed, bytes)),
+					Ok((_, consumed)) => Ok((false, consumed)),
 					Err(mut err2) =>
 					{
 						Err({
@@ -1124,26 +1205,23 @@ where
 	const ALONE_LEFT: bool = P::ALONE_LEFT;
 	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
-		let (result, consumed, bytes) = P::parse(tokens, f)?;
+		let (result, consumed) = P::parse(tokens, f)?;
 		if let Ok(result) = result.try_into()
 		{
-			Ok((result, consumed, bytes))
+			Ok((result, consumed))
 		}
 		else
 		{
-			Err(ParseError {
-				start_token: 0,
-				start_idx: 0,
-				end_token: consumed,
-				end_idx: bytes,
-				err_type: ParseErrorType::InternalError(concat!(file!(), ':', line!())),
-			})
+			Err(ParseError::from_consumed(
+				consumed,
+				ParseErrorType::InternalError(concat!(file!(), ':', line!())),
+			))
 		}
 	}
 
@@ -1161,7 +1239,7 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Alone<'a, P>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -1184,7 +1262,7 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -1192,7 +1270,7 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	{
 		let starts_with_symbol =
 			Symbol::parse(tokens.clone(), |_: Option<&str>, _: &str| 0).is_ok();
-		let ((off1, off2), consumed, bytes) =
+		let ((off1, off2), consumed) =
 			CommaBetween::<Offset<8, true>, Offset<6, false>>::parse(tokens, f)?;
 		let value = if starts_with_symbol && off1.value() > 0
 		{
@@ -1205,14 +1283,11 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 			off1.value()
 		};
 		value.try_into().map_or(
-			Err(ParseError {
-				start_token: 0,
-				start_idx: 0,
-				end_token: consumed,
-				end_idx: bytes,
-				err_type: ParseErrorType::from_bits::<7, true>(value as isize),
-			}),
-			|v| Ok(((v, off2), consumed, bytes)),
+			Err(ParseError::from_consumed(
+				consumed.clone(),
+				ParseErrorType::from_bits::<7, true>(value as isize),
+			)),
+			|v| Ok(((v, off2), consumed)),
 		)
 	}
 
@@ -1230,7 +1305,7 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -1247,13 +1322,11 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 							.unwrap_or(token.len()),
 					)
 					.0;
-				let value_error = Err(ParseError {
-					start_token: 0,
-					start_idx: 0,
-					end_token: 0,
-					end_idx: value_str.len(),
-					err_type: ParseErrorType::UnexpectedChars("a power of 2"),
-				});
+
+				let value_error = Err(ParseError::from_consumed(
+					CanConsume::chars(value_str.len()),
+					ParseErrorType::UnexpectedChars("a power of 2"),
+				));
 				value_str
 					.parse::<u16>()
 					.map_or(value_error.clone(), |value| {
@@ -1272,7 +1345,7 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 									0,
 									ParseErrorType::from_bits::<SIZE, false>(pow as isize),
 								)))
-								.map(|b| (b, 0, value_str.len()))
+								.map(|b| (b, CanConsume::chars(value_str.len())))
 						}
 						else
 						{
@@ -1297,7 +1370,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
@@ -1329,7 +1402,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 							err.start_idx += 1;
 							err
 						})
-						.map(|(b, _, bytes)| ((signed, b), 0, bytes + 1))
+						.map(|(b, consumed)| ((signed, b), CanConsume::chars(consumed.chars + 1)))
 				})
 			})
 	}
@@ -1349,58 +1422,36 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		IntSize::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
-			|((signed, pow2), consumed, bytes)| {
-				assert_eq!(consumed, 0);
+			|((signed, pow2), consumed)| {
+				assert_eq!(consumed.tokens, 0);
 				if SIZE >= 2u32.pow(pow2.value as u32)
 				{
-					let consumed_tok = tokens.clone().next().unwrap().len() == bytes;
-					let next_first = if consumed_tok
-					{
-						tokens.nth(1)
-					}
-					else
-					{
-						Some(&tokens.next().unwrap()[bytes..])
-					};
-					let tokens = next_first.into_iter().chain(tokens);
+					let (consumed, tokens) = consumed.advance_iter(tokens);
+					let consumed_tok = consumed.tokens > 0;
 
 					if signed
 					{
-						Then::<Comma, Bits<SIZE, true>>::parse(tokens, f).map(
-							|((_, b), consumed2, bytes2)| {
-								(
-									b.into(),
-									consumed2 + consumed_tok as usize,
-									if consumed2 == 0 { bytes } else { 0 } + bytes2,
-								)
-							},
-						)
+						Then::<Comma, Bits<SIZE, true>>::parse(tokens, f)
+							.map(|((_, b), consumed2)| (b.into(), consumed.then(&consumed2)))
 					}
 					else
 					{
-						Then::<Comma, Bits<SIZE, false>>::parse(tokens, f).map(
-							|((_, b), consumed2, bytes2)| {
-								(
-									b.into(),
-									consumed2 + consumed_tok as usize,
-									if consumed2 == 0 { bytes } else { 0 } + bytes2,
-								)
-							},
-						)
+						Then::<Comma, Bits<SIZE, false>>::parse(tokens, f)
+							.map(|((_, b), consumed2)| (b.into(), consumed.then(&consumed2)))
 					}
 					.map_err(|err| {
 						ParseError {
 							start_token: err.start_token + consumed_tok as usize,
 							start_idx: if !consumed_tok && err.start_token == 0
 							{
-								err.start_idx + bytes
+								err.start_idx + consumed.chars
 							}
 							else
 							{
@@ -1409,7 +1460,7 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 							end_token: err.end_token + consumed_tok as usize,
 							end_idx: if !consumed_tok && err.start_token == 0
 							{
-								err.end_idx + bytes
+								err.end_idx + consumed.chars
 							}
 							else
 							{
@@ -1425,7 +1476,7 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 						start_token: 0,
 						start_idx: 1,
 						end_token: 0,
-						end_idx: bytes,
+						end_idx: consumed.chars,
 						// TODO: should handle higher powers of 2
 						err_type: ParseErrorType::OutOfBoundValue(pow2.value as isize, 0, 0),
 					})
@@ -1465,27 +1516,24 @@ impl<'a> Parser<'a> for VecLength<'a>
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
 
-	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, usize, usize), ParseError<'a>>
+	fn parse<I, F, B>(mut tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Option<&str>, &str) -> i32,
 	{
 		Pow2::<3>::parse(tokens.clone(), f)
-			.and_then(|(value, consumed, bytes)| {
+			.and_then(|(value, consumed)| {
 				if value.is_max()
 				{
-					Err(ParseError {
-						start_token: 0,
-						start_idx: 0,
-						end_token: consumed,
-						end_idx: bytes,
-						err_type: ParseErrorType::OutOfBoundValue(value.value as isize, 0, 6),
-					})
+					Err(ParseError::from_consumed(
+						consumed,
+						ParseErrorType::OutOfBoundValue(value.value as isize, 0, 6),
+					))
 				}
 				else
 				{
-					Ok((value, consumed, bytes))
+					Ok((value, consumed))
 				}
 			})
 			.or_else(|_| {
@@ -1495,7 +1543,7 @@ impl<'a> Parser<'a> for VecLength<'a>
 					.and_then(|t| {
 						if t.starts_with('_')
 						{
-							Ok((Bits::get_min(), 0, 1))
+							Ok((Bits::get_min(), CanConsume::chars(1)))
 						}
 						else
 						{
