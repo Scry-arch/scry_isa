@@ -1,11 +1,11 @@
-use scry_isa::{Instruction, ParseError, Parser};
+use scry_isa::{Instruction, ParseError, Parser, Resolve};
 use std::borrow::Borrow;
 
 /// Parses the given string into an instruction.
 fn parse_assembly<'a, F, B>(asm: &'a str, f: B) -> Result<Instruction, ParseError<'a>>
 where
 	B: Borrow<F>,
-	F: Fn(Option<&str>, &str) -> i32,
+	F: Fn(Resolve) -> i32,
 {
 	let tokens: Vec<_> = asm.split_ascii_whitespace().collect();
 	Instruction::parse(tokens.iter().cloned(), f).map(|(instr, ..)| instr)
@@ -17,7 +17,7 @@ where
 fn test_case<'a, F, B>(source_asm: &str, expected_asm: &str, resolver: B, expected_bin: Option<u16>)
 where
 	B: Borrow<F>,
-	F: Fn(Option<&str>, &str) -> i32,
+	F: Fn(Resolve) -> i32,
 {
 	let instr = parse_assembly(source_asm, resolver)
 		.unwrap_or_else(|err| panic!("Failed to parse '{}': '{:?}'", source_asm, err));
@@ -88,9 +88,13 @@ macro_rules! test_assembly {
 				let mut expected_bin = None;
 				$(expected_bin = Some($bin);)?
 				test_case($asm, test_assembly!{@prioritize $asm $($asm2)?},
-					|start: Option<&str>, end: &str|{
+					|resolve: Resolve|{
 						$(
-							return addresses[end] - start.map_or($addr0, |st| addresses[st]);
+							return match resolve {
+								Resolve::Address(sym) => addresses[sym],
+								Resolve::Distance(sym1, sym2) => addresses[sym2] - addresses[sym1],
+								Resolve::DistanceCurrent(sym) => addresses[sym] - $addr0
+							};
 						)?
 						panic!("No symbols given.");
 					},

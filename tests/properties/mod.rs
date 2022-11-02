@@ -2,7 +2,7 @@ use crate::arbitrary::SeparatorType;
 use quickcheck::TestResult;
 use scry_isa::{
 	arbitrary::{ArbReference, ArbSymbol, AssemblyInstruction, OperandSubstitution},
-	Instruction, Parser,
+	Instruction, Parser, Resolve,
 };
 use std::cell::Cell;
 
@@ -22,10 +22,7 @@ fn print_then_parse(instr: Instruction) -> bool
 	}
 	else
 	{
-		match Instruction::parse(
-			buffer.split_ascii_whitespace(),
-			|_: Option<&str>, _: &str| unreachable!(),
-		)
+		match Instruction::parse(buffer.split_ascii_whitespace(), |_: Resolve| unreachable!())
 		{
 			Ok((instr2, ..)) =>
 			{
@@ -93,12 +90,18 @@ fn error_only_in_instruction(
 	let injected_symbol = Cell::new(false);
 	let tokens = buffer.split_ascii_whitespace().into_iter();
 
-	Instruction::parse(tokens.clone(), |start: Option<&str>, end: &str| {
-		if let Some(start) = start
+	Instruction::parse(tokens.clone(), |resolve: Resolve| {
+		if let Resolve::Distance(start, _) = resolve
 		{
 			injected_symbol.set(start.contains(inject))
 		}
-		injected_symbol.set(injected_symbol.get() || end.contains(inject));
+		match resolve
+		{
+			Resolve::Address(sym) | Resolve::DistanceCurrent(sym) | Resolve::Distance(_, sym) =>
+			{
+				injected_symbol.set(injected_symbol.get() || sym.contains(inject))
+			},
+		}
 		0
 	})
 	.map_or_else(
@@ -278,9 +281,5 @@ fn error_on_mnemonic_prefix(
 	test_string.push_str(rest.as_str());
 
 	// Try to parse, and ensure we et an error
-	Instruction::parse(
-		test_string.split_ascii_whitespace(),
-		|_: Option<&str>, _: &str| 0,
-	)
-	.is_err()
+	Instruction::parse(test_string.split_ascii_whitespace(), |_: Resolve| 0).is_err()
 }

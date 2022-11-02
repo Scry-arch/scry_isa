@@ -264,6 +264,23 @@ impl Consumed
 	}
 }
 
+/// Given to `Parser::parse`'s closure/function to allow for various ways of
+/// resolve symbol addresses.
+pub enum Resolve<'a>
+{
+	/// The absolute address of the given symbol
+	Address(&'a str),
+
+	/// The distance from the current address to the given symbol
+	DistanceCurrent(&'a str),
+
+	/// The distance from the first symbol to the second.
+	///
+	/// If the first symbol's address is highest, the result should be a
+	/// negative distance.
+	Distance(&'a str, &'a str),
+}
+
 pub trait Parser<'a>
 {
 	type Internal;
@@ -282,11 +299,7 @@ pub trait Parser<'a>
 	/// It is valid to have a successful parsing that consumed nothing.
 	///
 	/// The given function is used for resolving distances (in bytes) between
-	/// symbols. If (Some(x), y) should return the distance between symbols x
-	/// and y (i.e. subtract absolute addresses). If x has a lower address than
-	/// y, the result should be positive. If x has a higher address than y, the
-	/// result should be negative. If (None, y), the first symbol is the one for
-	/// the current instruction being parsed.
+	/// symbols. See `Resolve` for more.
 	///
 	/// The given iterator must produce tokens of only ASCII characters free of
 	/// whitespace. Effectively, the iterator must behave as if it was produced
@@ -295,7 +308,7 @@ pub trait Parser<'a>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32;
+		F: Fn(Resolve) -> i32;
 
 	fn print_with_whitespace(
 		internal: &Self::Internal,
@@ -324,7 +337,7 @@ impl<'a> Parser<'a> for ()
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		Ok(((), CanConsume::none()))
 	}
@@ -356,7 +369,7 @@ impl<'a> Parser<'a> for typ
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let value_string = tokens.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
@@ -393,7 +406,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Bits<SIZE, SIGNED>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		i32::parse(tokens, f).and_then(|(value, consumed)| {
 			value.try_into().map_or(
@@ -423,7 +436,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Exclude<Bits<SIZE, 
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		Bits::<SIZE, SIGNED>::parse(tokens, f)
 			.and_then(|(bits, consumed)| {
@@ -465,7 +478,7 @@ where
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		match P::parse(tokens, f)
 		{
@@ -519,7 +532,7 @@ impl<'a> Parser<'a> for Symbol
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let error_type =
 			ParseErrorType::UnexpectedChars("a symbol that start with a letter, '-', '_', or '.'");
@@ -573,13 +586,13 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let f = f.borrow();
 		i32::parse::<_, F, _>(tokens.clone(), f)
 			.or_else(|_| {
 				Symbol::parse::<_, F, _>(tokens, f).map(|(symbol, consumed)| {
-					let difference = f(None, symbol) / 2;
+					let difference = f(Resolve::DistanceCurrent(symbol)) / 2;
 					(difference - ((difference > 0) as i32), consumed)
 				})
 			})
@@ -614,7 +627,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let f = f.borrow();
 		Then::<Arrow, u16>::parse::<_, F, _>(tokens.clone(), f)
@@ -633,7 +646,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 			.or_else(|mut err| {
 				let mut result = Then::<Arrow, Symbol>::parse::<_, F, _>(tokens.clone(), f)
 					.and_then(|(((), sym1), consumed)| {
-						let off1 = (f.borrow()(None, sym1) / 2) - 1;
+						let off1 = (f.borrow()(Resolve::DistanceCurrent(sym1)) / 2) - 1;
 						if off1 < 0
 						{
 							Err(ParseError {
@@ -668,7 +681,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 							}
 							else
 							{
-								let next_offset = f.borrow()(Some(sym1), sym) / 2;
+								let next_offset = f.borrow()(Resolve::Distance(sym1, sym)) / 2;
 								if next_offset < 0
 								{
 									Err(ParseError {
@@ -733,7 +746,7 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for CommaBetween<'
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		Then::<P1, Then<Comma, P2>>::parse(tokens, f)
 			.map(|((left, ((), right)), consumed)| ((left, right), consumed))
@@ -759,7 +772,7 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let f = f.borrow();
 		match P1::parse::<_, F, _>(tokens.clone(), f)
@@ -834,7 +847,7 @@ where
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let f = f.borrow();
 		let err1 = match P1::parse::<_, F, _>(tokens.clone(), f)
@@ -914,7 +927,7 @@ impl<'a, T: Keyword> Parser<'a> for T
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		tokens
 			.next()
@@ -977,7 +990,7 @@ duplicate! {
 		where
 			I: Iterator<Item = &'a str> + Clone,
 			B: Borrow<F>,
-			F: Fn(Option<&str>, &str) -> i32
+			F: Fn(Resolve) -> i32
 		{
 			tokens.next()
 				.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
@@ -1010,7 +1023,7 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Maybe<'a, P>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		match P::parse(tokens, f)
 		{
@@ -1064,7 +1077,7 @@ where
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		match P::parse(tokens, f)
 		{
@@ -1104,7 +1117,7 @@ where
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		match P1::parse::<_, F, _>(tokens.clone(), f.borrow())
 		{
@@ -1209,7 +1222,7 @@ where
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		let (result, consumed) = P::parse(tokens, f)?;
 		if let Ok(result) = result.try_into()
@@ -1243,7 +1256,7 @@ impl<'a, P: 'a + Parser<'a>> Parser<'a> for Alone<'a, P>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		P::parse(tokens, f)
 	}
@@ -1266,10 +1279,9 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
-		let starts_with_symbol =
-			Symbol::parse(tokens.clone(), |_: Option<&str>, _: &str| 0).is_ok();
+		let starts_with_symbol = Symbol::parse(tokens.clone(), |_: Resolve| 0).is_ok();
 		let ((off1, off2), consumed) =
 			CommaBetween::<Offset<8, true>, Offset<6, false>>::parse(tokens, f)?;
 		let value = if starts_with_symbol && off1.value() > 0
@@ -1309,7 +1321,7 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		tokens
 			.next()
@@ -1374,7 +1386,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		tokens
 			.next()
@@ -1414,6 +1426,17 @@ impl<'a> Parser<'a> for IntSize<'a>
 	}
 }
 
+// let parsed_ref = Then::<Symbol, Maybe<Then<Arrow, Symbol>>>::parse::<_, F,
+// _>(next_token.clone().into_iter().chain(iter.clone()), f.borrow())
+// .and_then(|((sym1, sym2), consumed2)|{
+// if let Some((_, sym2)) = sym2 {
+// Ok((f.borrow()(Resolve::Distance(sym1, sym2)), consumed2))
+// } else {
+// Ok((f.borrow()(Resolve::Address(sym1)), consumed2))
+// }
+// });
+//
+
 pub struct TypedConst<'a, const SIZE: u32>(PhantomData<&'a ()>);
 impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 {
@@ -1426,7 +1449,7 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		IntSize::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
 			|((signed, pow2), consumed)| {
@@ -1434,19 +1457,51 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 				if SIZE >= 2u32.pow(pow2.value as u32)
 				{
 					let (consumed, tokens) = consumed.advance_iter(tokens);
-					let consumed_tok = consumed.tokens > 0;
+
+					let parsed_ref =
+						Then::<Then<Comma, Symbol>, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
+							tokens.clone(),
+							f.borrow(),
+						)
+						.and_then(|(((_, sym1), sym2), consumed2)| {
+							if let Some((_, sym2)) = sym2
+							{
+								Ok((f.borrow()(Resolve::Distance(sym1, sym2)), consumed2))
+							}
+							else
+							{
+								Ok((f.borrow()(Resolve::Address(sym1)), consumed2))
+							}
+						});
 
 					if signed
 					{
-						Then::<Comma, Bits<SIZE, true>>::parse(tokens, f)
-							.map(|((_, b), consumed2)| (b.into(), consumed.then(&consumed2)))
+						parsed_ref
+							.map(|(val, consumed2)| {
+								(Bits::<SIZE, true>::try_from(val).unwrap().into(), consumed2)
+							})
+							.or_else(|_| {
+								Then::<Comma, Bits<SIZE, true>>::parse(tokens, f)
+									.map(|((_, b), consumed2)| (b.into(), consumed2))
+							})
 					}
 					else
 					{
-						Then::<Comma, Bits<SIZE, false>>::parse(tokens, f)
-							.map(|((_, b), consumed2)| (b.into(), consumed.then(&consumed2)))
+						parsed_ref
+							.map(|(val, consumed2)| {
+								(
+									Bits::<SIZE, false>::try_from(val).unwrap().into(),
+									consumed2,
+								)
+							})
+							.or_else(|_| {
+								Then::<Comma, Bits<SIZE, false>>::parse(tokens, f)
+									.map(|((_, b), consumed2)| (b.into(), consumed2))
+							})
 					}
+					.map(|(b, consumed2)| (b, consumed.then(&consumed2)))
 					.map_err(|err| {
+						let consumed_tok = consumed.tokens > 0;
 						ParseError {
 							start_token: err.start_token + consumed_tok as usize,
 							start_idx: if !consumed_tok && err.start_token == 0
@@ -1520,7 +1575,7 @@ impl<'a> Parser<'a> for VecLength<'a>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
-		F: Fn(Option<&str>, &str) -> i32,
+		F: Fn(Resolve) -> i32,
 	{
 		Pow2::<3>::parse(tokens.clone(), f)
 			.and_then(|(value, consumed)| {

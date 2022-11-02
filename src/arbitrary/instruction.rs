@@ -1,6 +1,6 @@
 use crate::{
 	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, BitValue, CallVariant, Instruction,
-	Parser, StackControlVariant,
+	Parser, Resolve, StackControlVariant,
 };
 use duplicate::duplicate;
 use quickcheck::{Arbitrary, Gen};
@@ -305,7 +305,7 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 	}
 
 	/// Returns the assembly instruction and a resolver for any symbols.
-	pub fn tokens_and_resolver(&self) -> (String, impl Fn(Option<&str>, &str) -> i32)
+	pub fn tokens_and_resolver(&self) -> (String, impl Fn(Resolve) -> i32)
 	{
 		let mut buffer = String::new();
 		Instruction::print(&self.instruction, &mut buffer).unwrap();
@@ -381,8 +381,8 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 			assembly.push(' ');
 		}
 
-		(assembly, move |start, end| {
-			let resolve = |sym| {
+		(assembly, move |resolve| {
+			let addr_of = |sym| {
 				symbol_addresses
 					.iter()
 					.find_map(|(t, a)| {
@@ -397,9 +397,12 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 					})
 					.unwrap_or_else(|| panic!("Unknown symbol: {}", sym))
 			};
-			let start_addr = start.map(resolve).unwrap_or(0);
-			let sym_addr = resolve(end);
-			sym_addr - start_addr
+			match resolve
+			{
+				Resolve::Address(sym) => addr_of(sym),
+				Resolve::DistanceCurrent(sym) => addr_of(sym) - 0,
+				Resolve::Distance(sym1, sym2) => addr_of(sym2) - addr_of(sym1),
+			}
 		})
 	}
 }
