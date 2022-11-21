@@ -2025,7 +2025,7 @@ map_mnemonics! {
 	{
 		target = ReferenceParser<5>
 	}
-	(Alu2(Alu2Variant::ShiftRight, output, target)) [ 1 0 0 0 0 0 1 1[output:3]     [target:5]]
+	(Alu2(Alu2Variant::ShiftRight, output, target)) [ 1 0 0 0 0 0 1 1 [output:3]    [target:5]]
 	{
 		(output, target) <= CommaBetween<
 			Flatten<Then<
@@ -2059,13 +2059,9 @@ map_mnemonics! {
 	{
 		() = ()
 	}
-	"nop" (Nop) [ 0 0 0 1 0 0 0 1 [0 0 0 0 0 0 0 0]]
-	{
-		() = ()
-	}
 	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8]]
 	{
-		v <= Implicit<Exclude<Bits<8, false>,0>,255> => (*v)
+		v <= Implicit<Bits<8, false>,255> => (*v)
 	}
 	"const"
 	(Constant(imm)) [ 0 0 0 0 0 0 1 [imm:9] ]

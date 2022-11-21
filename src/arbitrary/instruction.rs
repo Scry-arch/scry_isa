@@ -4,7 +4,7 @@ use crate::{
 };
 use duplicate::duplicate;
 use quickcheck::{Arbitrary, Gen};
-use std::{collections::HashMap, convert::TryInto, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
 impl Arbitrary for Instruction
 {
@@ -53,16 +53,9 @@ impl Arbitrary for Instruction
 				)
 			},
 			11 => Store,
-			12 => Nop,
-			13 =>
-			{
-				// No zero
-				let x = (u8::arbitrary(g) % 255) + 1;
-				Request((x as i32).try_into().unwrap())
-			},
-			14 => Constant(Arbitrary::arbitrary(g)),
-
-			15 => Invalid(0),
+			12 => Request(Arbitrary::arbitrary(g)),
+			13 => Constant(Arbitrary::arbitrary(g)),
+			14 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}

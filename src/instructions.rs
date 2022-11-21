@@ -1,5 +1,6 @@
-use crate::{Bits, BitsDyn, Exclude};
+use crate::{Bits, BitsDyn};
 use duplicate::duplicate;
+use std::convert::TryInto;
 use variant_count::VariantCount;
 
 duplicate! {
@@ -60,8 +61,8 @@ pub enum Instruction
 	/// The capture instruction.
 	///
 	/// Fields:
-	/// 0. Output target 1.
-	/// 0. Output target 2.
+	/// 0. Target whose outputs to capture
+	/// 0. Target to get the captured inputs
 	Capture(Bits<5, false>, Bits<5, false>),
 
 	/// The duplicate instruction.
@@ -130,11 +131,8 @@ pub enum Instruction
 	/// The store instruction.
 	Store,
 
-	/// Instruction that does nothing.
-	Nop,
-
 	/// The request instruction.
-	Request(Exclude<Bits<8, false>, 0>),
+	Request(Bits<8, false>),
 
 	/// The constant instruction.
 	///
@@ -143,4 +141,13 @@ pub enum Instruction
 	/// 0. The raw bits of the constant. If signed, should be handled
 	/// accordingly.
 	Constant(BitsDyn<8>),
+}
+
+impl Instruction
+{
+	/// Returns the canonical `nop` instruction.
+	pub fn nop() -> Self
+	{
+		Self::Capture(0.try_into().unwrap(), 0.try_into().unwrap())
+	}
 }
