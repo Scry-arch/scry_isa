@@ -398,7 +398,7 @@ macro_rules! map_mnemonics_impl {
             where
                 I: Iterator<Item = &'a str> + Clone,
                 B: Borrow<F>,
-                F: Fn(Resolve) -> i32,
+                F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
             {
                 use Instruction::*;
                 lazy_static!{

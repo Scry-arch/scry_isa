@@ -298,7 +298,7 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 	}
 
 	/// Returns the assembly instruction and a resolver for any symbols.
-	pub fn tokens_and_resolver(&self) -> (String, impl Fn(Resolve) -> i32)
+	pub fn tokens_and_resolver(&self) -> (String, impl Fn(Resolve) -> Result<i32, &'_ str>)
 	{
 		let mut buffer = String::new();
 		Instruction::print(&self.instruction, &mut buffer).unwrap();
@@ -375,26 +375,24 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 		}
 
 		(assembly, move |resolve| {
-			let addr_of = |sym| {
-				symbol_addresses
-					.iter()
-					.find_map(|(t, a)| {
-						if t.as_str() == sym
-						{
-							Some(*a)
-						}
-						else
-						{
-							None
-						}
-					})
-					.unwrap_or_else(|| panic!("Unknown symbol: {}", sym))
-			};
 			match resolve
 			{
-				Resolve::Address(sym) => addr_of(sym),
-				Resolve::DistanceCurrent(sym) => addr_of(sym) - 0,
-				Resolve::Distance(sym1, sym2) => addr_of(sym2) - addr_of(sym1),
+				Resolve::DistanceCurrent(sym) | Resolve::Address(sym) =>
+				{
+					symbol_addresses.get(sym).cloned().ok_or(sym)
+				},
+				Resolve::Distance(sym1, sym2) =>
+				{
+					symbol_addresses
+						.get(sym2)
+						.ok_or(sym2)
+						.and_then(|sym2_addr| {
+							symbol_addresses
+								.get(sym1)
+								.ok_or(sym1)
+								.and_then(|sym1_addr| Ok(sym2_addr - sym1_addr))
+						})
+				},
 			}
 		})
 	}

@@ -102,7 +102,7 @@ fn error_only_in_instruction(
 				injected_symbol.set(injected_symbol.get() || sym.contains(inject))
 			},
 		}
-		0
+		Ok(0)
 	})
 	.map_or_else(
 		|err| {
@@ -281,5 +281,5 @@ fn error_on_mnemonic_prefix(
 	test_string.push_str(rest.as_str());
 
 	// Try to parse, and ensure we et an error
-	Instruction::parse(test_string.split_ascii_whitespace(), |_: Resolve| 0).is_err()
+	Instruction::parse(test_string.split_ascii_whitespace(), |_: Resolve| Ok(0)).is_err()
 }

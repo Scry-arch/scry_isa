@@ -1,11 +1,11 @@
 use scry_isa::{Instruction, ParseError, Parser, Resolve};
-use std::borrow::Borrow;
+use std::{borrow::Borrow, collections::HashMap};
 
 /// Parses the given string into an instruction.
 fn parse_assembly<'a, F, B>(asm: &'a str, f: B) -> Result<Instruction, ParseError<'a>>
 where
 	B: Borrow<F>,
-	F: Fn(Resolve) -> i32,
+	F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 {
 	let tokens: Vec<_> = asm.split_ascii_whitespace().collect();
 	Instruction::parse(tokens.iter().cloned(), f).map(|(instr, ..)| instr)
@@ -14,10 +14,14 @@ where
 /// Tests that the given source assembly string parses (using the given
 /// resolver) into an instruction that then prints into the expected assembly
 /// string.
-fn test_case<'a, F, B>(source_asm: &str, expected_asm: &str, resolver: B, expected_bin: Option<u16>)
-where
+fn test_case<'a, F, B>(
+	source_asm: &'a str,
+	expected_asm: &str,
+	resolver: B,
+	expected_bin: Option<u16>,
+) where
 	B: Borrow<F>,
-	F: Fn(Resolve) -> i32,
+	F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 {
 	let instr = parse_assembly(source_asm, resolver)
 		.unwrap_or_else(|err| panic!("Failed to parse '{}': '{:?}'", source_asm, err));
@@ -41,6 +45,44 @@ where
 			source_asm
 		);
 	}
+}
+
+fn test_case2<'a, const N: usize>(
+	src: &'a str,
+	expected: &'a str,
+	labels: [(&'a str, i32); N],
+	expected_bin: Option<u16>,
+	current_addr: Option<i32>,
+)
+{
+	let addresses: HashMap<_, _> = labels.into();
+	test_case(
+		src,
+		expected,
+		|resolve| {
+			match resolve
+			{
+				Resolve::Address(sym) => addresses.get(sym).cloned().ok_or(sym),
+				Resolve::Distance(sym1, sym2) =>
+				{
+					addresses.get(sym2).ok_or(sym2).and_then(|sym2_addr| {
+						addresses
+							.get(sym1)
+							.ok_or(sym1)
+							.and_then(|sym1_addr| Ok(sym2_addr - sym1_addr))
+					})
+				},
+				Resolve::DistanceCurrent(sym) =>
+				{
+					addresses
+						.get(sym)
+						.ok_or(sym)
+						.map(|addr| addr - current_addr.expect("No current address given"))
+				},
+			}
+		},
+		expected_bin,
+	);
 }
 
 /// Tests the parsing of specific assembly instruction.
@@ -79,26 +121,14 @@ macro_rules! test_assembly {
 		#[test]
 		fn assembly() {
 			$(
-				$(
-					let mut addresses = std::collections::HashMap::new();
-					$(
-						addresses.insert(stringify!($id1), $addr1);
-					)+
-				)?
 				let mut expected_bin = None;
 				$(expected_bin = Some($bin);)?
-				test_case($asm, test_assembly!{@prioritize $asm $($asm2)?},
-					|resolve: Resolve|{
-						$(
-							return match resolve {
-								Resolve::Address(sym) => addresses[sym],
-								Resolve::Distance(sym1, sym2) => addresses[sym2] - addresses[sym1],
-								Resolve::DistanceCurrent(sym) => addresses[sym] - $addr0
-							};
-						)?
-						panic!("No symbols given.");
-					},
-					expected_bin
+				let mut addr0 = None;
+				$(addr0.replace($addr0);)?
+				test_case2($asm, test_assembly!{@prioritize $asm $($asm2)?},
+					[$($((stringify!($id1), $addr1)),+)?],
+					expected_bin,
+					addr0
 				);
 			)*
 		}
