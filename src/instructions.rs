@@ -9,7 +9,7 @@ duplicate! {
 		[AluVariant]			[Inc, Dec, Add, Sub, ShiftLeft, ShiftRight, RotateLeft, RotateRight];
 		[Alu2Variant]			[Add, Sub, ShiftLeft, ShiftRight];
 		[Alu2OutputVariant]		[High, Low, FirstLow, FirstHigh, NextHigh, NextLow];
-		[CallVariant]			[Ret]; //[Call, Portal, Ret, Trap]
+		[CallVariant]			[Ret, Call]; //[, Portal, Ret, Trap]
 		[StackControlVariant] 	[Reserve, Free];
 	]
 	#[derive(Debug, Copy, Clone, Eq, PartialEq)]

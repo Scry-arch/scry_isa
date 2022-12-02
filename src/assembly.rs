@@ -1969,7 +1969,11 @@ map_mnemonics! {
 		>
 		=> (*imm, *loc)
 	}
-	"ret"(Call(CallVariant::Ret, loc)) [ 0 0 0 1 0 0 0 0 0 0 [loc:6]]
+	"call"(Call(CallVariant::Call, loc)) [ 0 0 0 1 0 0 0 0 0 0 [loc:6]]
+	{
+		loc = Offset<6,false>
+	}
+	"ret"(Call(CallVariant::Ret, loc)) [ 0 0 0 1 0 0 0 0 0 1 [loc:6]]
 	{
 		loc = Offset<6,false>
 	}
