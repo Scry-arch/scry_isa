@@ -651,6 +651,50 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	}
 }
 
+/// Used to parse call argument falgs in references ("=>|").
+///
+/// Parses as many consecutive flags as possible, returning the number of flag.
+/// If no flags are given, return 0. Cannot fail the parsing.
+pub struct CallArgFlags();
+impl<'a> Parser<'a> for CallArgFlags
+{
+	type Internal = u8;
+
+	const ALONE_LEFT: bool = false;
+	const ALONE_RIGHT: bool = false;
+
+	fn parse<I, F, B>(tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
+	{
+		let mut count = 0;
+		let mut total_consumed = CanConsume::none();
+
+		while let Ok((_, can_consume)) = Then::<Arrow, Pipe>::parse(
+			total_consumed.clone().advance_iter(tokens.clone()).1,
+			|_| unreachable!(),
+		)
+		{
+			let consumed = total_consumed.advance_iter(tokens.clone()).0;
+			total_consumed = consumed.then(&can_consume);
+			count += 1;
+		}
+
+		Ok((count, total_consumed))
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		for _ in 0..*internal
+		{
+			out.write_str("=>|")?;
+		}
+		Ok(())
+	}
+}
+
 pub struct ReferenceParser<const SIZE: u32>();
 impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 {
@@ -680,36 +724,37 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 				)
 			})
 			.or_else(|mut err| {
-				let mut result = Then::<Arrow, Symbol>::parse::<_, F, _>(tokens.clone(), f)
-					.and_then(|(((), sym1), consumed)| {
-						f.borrow()(Resolve::DistanceCurrent(sym1))
-							.map_err(|_| {
-								ParseError::from_consumed(
-									consumed.clone(),
-									ParseErrorType::UnkownSymbol,
-								)
-							})
-							.and_then(|distance| {
-								let off1 = (distance / 2) - 1;
-								if off1 < 0
-								{
-									Err(ParseError {
-										start_token: consumed.tokens,
-										start_idx: 2 * ((consumed.tokens == 0) as usize),
-										end_token: consumed.tokens,
-										end_idx: (2 * ((consumed.tokens == 0) as usize))
-											+ sym1.len(),
-										err_type: ParseErrorType::Invalid(
-											"must be at or follow the instruction",
-										),
-									})
-								}
-								else
-								{
-									Ok(((sym1, off1), consumed))
-								}
-							})
-					});
+				let mut result =
+					Then::<CallArgFlags, Then<Arrow, Symbol>>::parse::<_, F, _>(tokens.clone(), f)
+						.and_then(|((arg_flags, ((), sym1)), consumed)| {
+							f.borrow()(Resolve::DistanceCurrent(sym1))
+								.map_err(|_| {
+									ParseError::from_consumed(
+										consumed.clone(),
+										ParseErrorType::UnkownSymbol,
+									)
+								})
+								.and_then(|distance| {
+									let off1 = (distance / 2) - 1;
+									if off1 < 0
+									{
+										Err(ParseError {
+											start_token: consumed.tokens,
+											start_idx: 2 * ((consumed.tokens == 0) as usize),
+											end_token: consumed.tokens,
+											end_idx: (2 * ((consumed.tokens == 0) as usize))
+												+ sym1.len(),
+											err_type: ParseErrorType::Invalid(
+												"must be at or follow the instruction",
+											),
+										})
+									}
+									else
+									{
+										Ok(((sym1, off1 + (arg_flags as i32)), consumed))
+									}
+								})
+						});
 				let mut next_branch_to = true;
 				let mut next_result = result.clone();
 				while let Ok(((sym1, offset), consumed)) = next_result
@@ -718,57 +763,76 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 					let sym1_unknown =
 						ParseError::from_consumed(consumed.clone(), ParseErrorType::UnkownSymbol);
 					let (consumed, iter) = consumed.advance_iter(tokens.clone());
-					next_result = Then::<Arrow, Symbol>::parse::<_, F, _>(iter, f).and_then(
-						|(((), sym), consumed2)| {
-							let next_consumed = consumed.then(&consumed2);
+					next_result =
+						Then::<CallArgFlags, Then<Arrow, Symbol>>::parse::<_, F, _>(iter, f)
+							.and_then(|((arg_flags, ((), sym)), consumed2)| {
+								let next_consumed = consumed.then(&consumed2);
 
-							if next_branch_to
-							{
-								Ok(((sym, offset), next_consumed))
-							}
-							else
-							{
-								f.borrow()(Resolve::Distance(sym1, sym))
-									.map_err(|unknown_sym| {
-										if unknown_sym == sym1
-										{
-											sym1_unknown
-										}
-										else
-										{
-											ParseError::from_consumed(
-												consumed2.clone(),
-												ParseErrorType::UnkownSymbol,
-											)
-										}
-									})
-									.and_then(|distance| {
-										let next_offset = distance / 2;
-										if next_offset < 0
-										{
-											Err(ParseError {
-												start_token: next_consumed.tokens
-													+ ((next_consumed.chars > 0) as usize),
-												start_idx: consumed.chars
-													* ((consumed2.tokens == 0) as usize),
-												end_token: next_consumed.tokens,
-												end_idx: sym.len()
-													+ (consumed.chars
-														* ((consumed2.tokens == 0) as usize)),
-												err_type: ParseErrorType::Invalid(
-													"must refer to an address higher than the \
-													 previous label in the chain",
-												),
-											})
-										}
-										else
-										{
-											Ok(((sym, offset + next_offset), next_consumed))
-										}
-									})
-							}
-						},
-					);
+								if next_branch_to
+								{
+									if arg_flags != 0
+									{
+										Err(ParseError::from_consumed(
+											consumed2,
+											ParseErrorType::Invalid(
+												"Cannot have call argument flags before a branch \
+												 target",
+											),
+										))
+									}
+									else
+									{
+										Ok(((sym, offset), next_consumed))
+									}
+								}
+								else
+								{
+									f.borrow()(Resolve::Distance(sym1, sym))
+										.map_err(|unknown_sym| {
+											if unknown_sym == sym1
+											{
+												sym1_unknown
+											}
+											else
+											{
+												ParseError::from_consumed(
+													consumed2.clone(),
+													ParseErrorType::UnkownSymbol,
+												)
+											}
+										})
+										.and_then(|distance| {
+											let next_offset = distance / 2;
+											if next_offset < 0
+											{
+												Err(ParseError {
+													start_token: next_consumed.tokens
+														+ ((next_consumed.chars > 0) as usize),
+													start_idx: consumed.chars
+														* ((consumed2.tokens == 0) as usize),
+													end_token: next_consumed.tokens,
+													end_idx: sym.len()
+														+ (consumed.chars
+															* ((consumed2.tokens == 0) as usize)),
+													err_type: ParseErrorType::Invalid(
+														"must refer to an address higher than the \
+														 previous label in the chain",
+													),
+												})
+											}
+											else
+											{
+												Ok((
+													(
+														sym,
+														offset + next_offset + (arg_flags as i32),
+													),
+													next_consumed,
+												))
+											}
+										})
+								}
+							});
 					next_branch_to = !next_branch_to;
 				}
 				result.and_then(|((_, offset), consumed)| {
@@ -1039,6 +1103,7 @@ duplicate! {
 		[Arrow]	["=>"]		[false];
 		[Comma]	[","]		[true];
 		[Plus]	["+"]		[false];
+		[Pipe]	["|"]		[false];
 	]
 	pub struct name();
 	impl<'a> Parser<'a> for name

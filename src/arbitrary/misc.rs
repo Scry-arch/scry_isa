@@ -212,8 +212,10 @@ impl Arbitrary for ArbSymbol
 /// Arbitrary output reference e.g. "=>branch=>branch_to=>target"
 /// Each element is the symbol and its address for each link.
 /// E.g. [("branch", 10), ("branch_to", 20), ("target", 30)]
+///
+/// If none, it means its a call argument flag (=>|=>).
 #[derive(Clone, Debug)]
-pub struct ArbReference(pub Vec<(ArbSymbol, i32)>);
+pub struct ArbReference(pub Vec<Option<(ArbSymbol, i32)>>);
 impl Arbitrary for ArbReference
 {
 	fn arbitrary(g: &mut Gen) -> Self
@@ -221,12 +223,24 @@ impl Arbitrary for ArbReference
 		let mut result = Vec::<ArbSymbol>::arbitrary(g);
 		// Ensure there is at least 1
 		result.push(Arbitrary::arbitrary(g));
+		let len = result.len();
 		Self(
 			result
 				.into_iter()
 				.enumerate()
-				// Placeholder addresses
-				.map(|(i, s)| (s, ((i + 1) * 2) as i32))
+				.map(|(i, s)| {
+					if (i + 1 != len) && u8::arbitrary(g) % 10 == 0
+					{
+						// 10% of symbols should be converted to call argument flags
+						// (i.e. =>symbol=> becomes =>|=>)
+						// Cant be the last
+						None
+					}
+					else
+					{
+						Some((s, ((i + 1) * 2) as i32))
+					}
+				})
 				.collect::<Vec<_>>(),
 		)
 	}
@@ -236,13 +250,19 @@ impl Arbitrary for ArbReference
 		let mut result: Vec<_> = Vec::new();
 
 		// Shrink by shrinking symbol names
-		result.extend(self.0.iter().enumerate().flat_map(|(i, (sym, address))| {
-			sym.shrink().map(move |sym| {
-				let mut clone = self.0.clone();
-				clone[i] = (sym, *address);
-				clone
-			})
-		}));
+		result.extend(
+			self.0
+				.iter()
+				.enumerate()
+				.filter_map(|(i, sym_opt)| sym_opt.as_ref().map(|sym| (i, sym)))
+				.flat_map(|(i, (sym, address))| {
+					sym.shrink().map(move |sym| {
+						let mut clone = self.0.clone();
+						clone[i] = Some((sym, *address));
+						clone
+					})
+				}),
+		);
 
 		Box::new(result.into_iter().map(|vec| Self(vec)))
 	}
@@ -259,6 +279,19 @@ pub enum OperandSubstitution
 	/// Substituting output reference operands with symbol chains
 	/// E.g. "add =>10" => "add =>branch=>branch_to=>target"
 	Ref(ArbReference),
+}
+impl OperandSubstitution
+{
+	// Easy was to make a reference substitution using a sequence of symbols and
+	// addresses
+	pub fn make_ref(iter: impl IntoIterator<Item = Option<(impl ToString, i32)>>) -> Self
+	{
+		Self::Ref(ArbReference(
+			iter.into_iter()
+				.map(|link| link.map(|(sym, addr)| (ArbSymbol(sym.to_string()), addr)))
+				.collect(),
+		))
+	}
 }
 impl Arbitrary for OperandSubstitution
 {

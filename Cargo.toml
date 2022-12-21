@@ -16,4 +16,5 @@ quickcheck = { version = "1", optional = true }
 quickcheck_macros = "1"
 
 [features]
+default = ["quickcheck_arbitrary"]
 quickcheck_arbitrary = ["quickcheck", "num-traits"]

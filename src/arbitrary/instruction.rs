@@ -136,21 +136,36 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 					{
 						gen_range(g, 0, value + 1)
 					};
-					result_refs.push((Arbitrary::arbitrary(g), (1 + first_offset) * 2));
+					result_refs.push(Some((Arbitrary::arbitrary(g), (1 + first_offset) * 2)));
 
-					let mut value_left = value - first_offset;
-					let mut last_address: i32 = result_refs[0].1;
-					let mut next_branch_to = true;
+					let mut offset_count = first_offset;
+					let mut last_address = result_refs[0].as_ref().map_or(0, |(_, addr)| *addr);
+					let mut last_was_offset = true;
 
-					while value_left > 0
+					while offset_count < value
 					{
-						if next_branch_to
+						let value_left = value - offset_count;
+						if last_was_offset
 						{
-							last_address = gen_range(g, 0, (i32::MAX / 2) - value_left) * 2;
+							// 10% chance of adding call argument flag, otherwise a jump
+							if u8::arbitrary(g) % 10 == 0
+							{
+								// argument flags can only split an offset, so add one before the
+								// last offset
+								result_refs.insert(result_refs.len() - 1, None);
+								offset_count += 1;
+							}
+							else
+							{
+								last_address = gen_range(g, 0, (i32::MAX / 2) - value_left) * 2;
+								result_refs.push(Some((Arbitrary::arbitrary(g), last_address)));
+								last_was_offset = false;
+							}
 						}
 						else
 						{
-							// 50% chance of additional links
+							// Last was either a jump or a call argument flag, next must therefore
+							// be offset 50% chance of not using all value, so need more links
 							let next_offset = if bool::arbitrary(g)
 							{
 								value_left
@@ -160,12 +175,14 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 								gen_range(g, 1, value_left + 1)
 							};
 							last_address += next_offset * 2;
-							value_left -= next_offset;
-						}
+							offset_count += next_offset;
+							last_was_offset = true;
+							result_refs.push(Some((Arbitrary::arbitrary(g), last_address)))
+						};
 						assert!(last_address >= 0);
-						result_refs.push((Arbitrary::arbitrary(g), last_address));
-						next_branch_to = !next_branch_to;
 					}
+					assert_eq!(offset_count, value);
+					assert!(result_refs.len() >= 1);
 					substitutions.push((idx, OperandSubstitution::Ref(ArbReference(result_refs))))
 				}
 			}
@@ -212,22 +229,30 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 					if refs.len() > 0
 					{
 						// Shrink by shrinking the last link offset
-						if refs.len() % 2 != 0
+						let last_is_offset =
+							refs.iter().filter(|sym| sym.is_some()).count() % 2 != 0;
+						if last_is_offset
 						{
 							// The last link is an offset
 							let mut refs_clone = refs.clone();
-							let (removed_sym, removed_address) = refs_clone.pop().unwrap();
+							let (removed_sym, removed_address) = refs_clone.pop().unwrap().unwrap();
 
-							let previous_address = refs_clone.last().map_or(0, |(_, a)| *a);
-
+							let previous_address = refs_clone
+								.iter()
+								.rev()
+								.find(|sym| sym.is_some())
+								.map_or(0, |sym| sym.as_ref().unwrap().1);
 							let offset = ((removed_address - previous_address) / 2) - 1;
 							offset.shrink().for_each(|o| {
 								let mut instr_clone = self.instruction.clone();
 								let mut refs_clone = refs_clone.clone();
 
-								refs_clone
-									.push((removed_sym.clone(), previous_address + ((o + 1) * 2)));
-								*get_reference_value_mut(&mut instr_clone, removed_idx) = o;
+								refs_clone.push(Some((
+									removed_sym.clone(),
+									previous_address + ((o + 1) * 2),
+								)));
+								*get_reference_value_mut(&mut instr_clone, removed_idx) -=
+									offset - o;
 
 								let mut subs = substitutions.clone();
 								subs.push((
@@ -243,30 +268,46 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 						}
 
 						// shrink by removing a reference link
-						let mut instr_clone = self.instruction.clone();
-						let mut refs_clone = refs.clone();
-						let (_, removed_address) = refs_clone.pop().unwrap();
-
-						if refs.len() % 2 != 0
+						// Only remove last symbol if value is zero
+						let value_zero = references(&self.instruction)
+							.find(|(idx, _)| *idx == removed_idx)
+							.unwrap()
+							.1 == 0;
+						if !value_zero || refs.len() > 1
 						{
-							// The last link is an offset
-							let previous_address = refs_clone.last().map_or(0, |(_, a)| *a);
-							*get_reference_value_mut(&mut instr_clone, removed_idx) -=
-								((removed_address-previous_address)/2)
-										// If removing the last link, need to
-										// simulate target is address 2
-										- (refs.len() == 1) as i32;
+							let mut instr_clone = self.instruction.clone();
+							let mut refs_clone = refs.clone();
+							if refs.len() >= 2
+								&& refs.get(refs.len() - 2).map_or(false, Option::is_none)
+							{
+								// Second to last is call argument flag, remove it
+								assert!(refs_clone.remove(refs.len() - 2).is_none());
+								// Increase the last links address to compensate
+								refs_clone.last_mut().unwrap().as_mut().unwrap().1 += 2;
+							}
+							else
+							{
+								let (_, removed_address) = refs_clone.pop().unwrap().unwrap();
+
+								if last_is_offset
+								{
+									let previous_address =
+										refs_clone.last().map_or(0, |sym| sym.as_ref().unwrap().1);
+									*get_reference_value_mut(&mut instr_clone, removed_idx) -=
+										(removed_address - previous_address) / 2;
+								}
+							}
+							let mut subs = substitutions.clone();
+							subs.push((
+								removed_idx,
+								OperandSubstitution::Ref(ArbReference(refs_clone)),
+							));
+							result.push(Self {
+								instruction: instr_clone,
+								substitutions: subs,
+								phantom: PhantomData,
+							});
 						}
-						let mut subs = substitutions.clone();
-						subs.push((
-							removed_idx,
-							OperandSubstitution::Ref(ArbReference(refs_clone)),
-						));
-						result.push(Self {
-							instruction: instr_clone,
-							substitutions: subs,
-							phantom: PhantomData,
-						});
 					}
 				},
 			}
@@ -353,12 +394,18 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 					}
 					else
 					{
-						for (sym, address) in symbols.iter()
-						{
+						symbols.iter().for_each(|sym_opt| {
 							replacement.push_str("=>");
-							replacement.push_str(sym.0.as_str());
-							symbol_addresses.insert(sym.0.clone(), *address);
-						}
+							if let Some((sym, address)) = sym_opt
+							{
+								replacement.push_str(sym.0.as_str());
+								symbol_addresses.insert(sym.0.clone(), *address);
+							}
+							else
+							{
+								replacement.push('|');
+							}
+						});
 					}
 					// Add separators after reference value
 					replacement.push_str(split.1);

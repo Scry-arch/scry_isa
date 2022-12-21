@@ -1,10 +1,11 @@
 use crate::arbitrary::SeparatorType;
+use duplicate::duplicate_item;
 use quickcheck::TestResult;
 use scry_isa::{
 	arbitrary::{ArbReference, ArbSymbol, AssemblyInstruction, OperandSubstitution},
-	Instruction, Parser, Resolve,
+	AluVariant, Instruction, Parser, Resolve,
 };
-use std::cell::Cell;
+use std::{cell::Cell, convert::TryInto};
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
@@ -48,16 +49,116 @@ fn print_then_parse(instr: Instruction) -> bool
 	}
 }
 
+/// Takes the given assembly instruction and tests that it is assembled to the
+/// correct instruction.
+fn test_parse_assembly(assembly: AssemblyInstruction<Instruction>) -> TestResult
+{
+	let (tokens, resolver) = assembly.tokens_and_resolver();
+	Instruction::parse(tokens.split_ascii_whitespace(), resolver).map_or_else(
+		|err| TestResult::error(format!("Failed to parse: {:?}", err)),
+		|(parsed_instr, ..)| {
+			if assembly.instruction == parsed_instr
+			{
+				TestResult::passed()
+			}
+			else
+			{
+				TestResult::error(format!(
+					"Unexpected result of parsing (expected != actual): {:?} != {:?}",
+					assembly.instruction, parsed_instr
+				))
+			}
+		},
+	)
+}
+
 /// Tests that any valid assembly instruction can be parsed to produce the right
 /// instruction
 #[quickcheck]
-fn parse_assembly(assembly: AssemblyInstruction) -> bool
+fn parse_assembly(assembly: AssemblyInstruction) -> TestResult
 {
-	let (tokens, resolver) = assembly.tokens_and_resolver();
-	Instruction::parse(tokens.split_ascii_whitespace(), resolver)
-		.map_or(false, |(parsed_instr, ..)| {
-			assembly.instruction == parsed_instr
-		})
+	test_parse_assembly(assembly)
+}
+
+/// Test specific cases of `parse_assembly`
+#[duplicate_item(
+	name	instr	subs;
+
+	// Tests assembly can use a reference of just one symbol, e.g. "add =>label"
+	[ parse_assembly_single_symbol ]
+	[ Instruction::Alu(AluVariant::Add, 5.try_into().unwrap()) ]
+	[ (1, OperandSubstitution::make_ref([Some(("label", 12))])) ];
+
+	// Tests assembly can use a reference to the first instruction after a control
+	// flow trigger E.g. "inc =>label1=>label2"
+	[ parse_assembly_to_jump ]
+	[ Instruction::Alu(AluVariant::Inc, 12.try_into().unwrap()) ]
+	[ (1, OperandSubstitution::make_ref([
+		Some(("label1", 26)),
+		Some(("label2", 124))
+	]))];
+
+	// Tests assembly can use a reference to an offset after a control flow trigger
+	// E.g. "dec =>label1=>label2=>label3"
+	[ parse_assembly_to_after_jump ]
+	[ Instruction::Alu(AluVariant::Dec, 15.try_into().unwrap()) ]
+	[ (1, OperandSubstitution::make_ref([
+		Some(("label1", 26)),
+		Some(("label2", 124)),
+		Some(("label3", 130))
+	]))];
+
+	// Tests assembly can use a reference with multiple control-flow triggers
+	// E.g. "Echo =>0, =>label1=>label2=>label3=>label4=>label5"
+	[ parse_assembly_multi_jump ]
+	[ Instruction::Echo(false, 0.try_into().unwrap(), 12.try_into().unwrap()) ]
+	[ (2, OperandSubstitution::make_ref([
+		Some(("label1", 12)),
+		Some(("label2", 560)),
+		Some(("label3", 564)),
+		Some(("label4", 56)),
+		Some(("label5", 66))
+	]))];
+
+	// Tests assembly can use a reference with a call argument flag
+	// E.g. "dec =>|=>label"
+	[ parse_assembly_argument_flag ]
+	[ Instruction::Alu(AluVariant::Dec, 15.try_into().unwrap()) ]
+	[ (1, OperandSubstitution::make_ref([
+		None,
+		Some(("label1", 30))
+	]))];
+
+	// Tests assembly can use a reference with multiple call argument flags
+	// E.g. "dup =>|=>|=>label, =>0"
+	[ parse_assembly_multiple_argument_flags ]
+	[ Instruction::Duplicate(false, 9.try_into().unwrap(), 0.try_into().unwrap()) ]
+	[ (1, OperandSubstitution::make_ref([
+		None,
+		None,
+		Some(("label1", 16))
+	]))];
+
+	// Tests assembly can use a reference with call argument flags after a jump
+	// E.g. "dec =>label1=>label2=>|=>label3"
+	[ parse_assembly_argument_flags_after_jump ]
+	[ Instruction::Pick(6.try_into().unwrap()) ]
+	[ (1, OperandSubstitution::make_ref([
+		Some(("label1", 6)),
+		Some(("label2", 456)),
+		None,
+		Some(("label3", 462)),
+	]))];
+)]
+#[test]
+fn name()
+{
+	let result = test_parse_assembly(AssemblyInstruction {
+		instruction: instr,
+		substitutions: vec![subs],
+		phantom: Default::default(),
+	});
+	assert!(!result.is_failure(), "{:?}", result);
 }
 
 /// Tests that if parsing fails because of bad syntax, the reported span is
@@ -191,7 +292,7 @@ fn different_separator_tokenization(
 	t_rest: Vec<SeparatorType>,
 ) -> TestResult
 {
-	const SEPARATORS: &[&'static str] = &["=>", "+", ","];
+	const SEPARATORS: &[&'static str] = &["=>", "+", ",", "|"];
 
 	let (tokens, resolver) = assembly.tokens_and_resolver();
 
