@@ -15,6 +15,7 @@ test_assembly! {
 	"rol =>11"
 	"ror =>12"
 	"ror =>13"
+	"mul =>10"
 
 	(10 target:12)
 	"inc =>target" => "inc =>0"

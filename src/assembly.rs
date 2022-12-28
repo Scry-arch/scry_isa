@@ -2012,6 +2012,7 @@ map_mnemonics! {
 	"dec"(Alu(AluVariant::Dec, target))             [ 1 0 0 0 0 0 0 1 [0 0 0]       [target:5]]
 	"rol"(Alu(AluVariant::RotateLeft, target))      [ 1 0 0 0 0 0 1 0 [0 0 0]       [target:5]]
 	"ror"(Alu(AluVariant::RotateRight, target))     [ 1 0 0 0 0 0 1 1 [0 0 0]       [target:5]]
+	"mul"(Alu(AluVariant::Mul, target))             [ 1 0 0 0 0 1 1 1 0 0 0         [target:5]]
 	{
 		target = ReferenceParser<5>
 	}
