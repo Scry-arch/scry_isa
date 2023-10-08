@@ -2,10 +2,10 @@ use crate::arbitrary::SeparatorType;
 use duplicate::duplicate_item;
 use quickcheck::TestResult;
 use scry_isa::{
-	arbitrary::{ArbReference, ArbSymbol, AssemblyInstruction, OperandSubstitution},
+	arbitrary::{ArbSymbol, AssemblyInstruction, OperandSubstitutions, SubType},
 	AluVariant, Instruction, Parser, Resolve,
 };
-use std::{cell::Cell, convert::TryInto};
+use std::{cell::Cell, collections::HashMap, convert::TryInto, marker::PhantomData};
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.
@@ -87,75 +87,75 @@ fn parse_assembly(assembly: AssemblyInstruction) -> TestResult
 	// Tests assembly can use a reference of just one symbol, e.g. "add =>label"
 	[ parse_assembly_single_symbol ]
 	[ Instruction::Alu(AluVariant::Add, 5.try_into().unwrap()) ]
-	[ (1, OperandSubstitution::make_ref([Some(("label", 12))])) ];
+	[ 1, vec![Some(("label", 12))] ];
 
 	// Tests assembly can use a reference to the first instruction after a control
 	// flow trigger E.g. "inc =>label1=>label2"
 	[ parse_assembly_to_jump ]
 	[ Instruction::Alu(AluVariant::Inc, 12.try_into().unwrap()) ]
-	[ (1, OperandSubstitution::make_ref([
+	[ 1, vec![
 		Some(("label1", 26)),
 		Some(("label2", 124))
-	]))];
+	]];
 
 	// Tests assembly can use a reference to an offset after a control flow trigger
 	// E.g. "dec =>label1=>label2=>label3"
 	[ parse_assembly_to_after_jump ]
 	[ Instruction::Alu(AluVariant::Dec, 15.try_into().unwrap()) ]
-	[ (1, OperandSubstitution::make_ref([
+	[ 1, vec![
 		Some(("label1", 26)),
 		Some(("label2", 124)),
 		Some(("label3", 130))
-	]))];
+	]];
 
 	// Tests assembly can use a reference with multiple control-flow triggers
 	// E.g. "Echo =>0, =>label1=>label2=>label3=>label4=>label5"
 	[ parse_assembly_multi_jump ]
 	[ Instruction::Echo(false, 0.try_into().unwrap(), 12.try_into().unwrap()) ]
-	[ (2, OperandSubstitution::make_ref([
+	[ 2, vec![
 		Some(("label1", 12)),
 		Some(("label2", 560)),
 		Some(("label3", 564)),
 		Some(("label4", 56)),
 		Some(("label5", 66))
-	]))];
+	]];
 
 	// Tests assembly can use a reference with a call argument flag
 	// E.g. "dec =>|=>label"
 	[ parse_assembly_argument_flag ]
 	[ Instruction::Alu(AluVariant::Dec, 15.try_into().unwrap()) ]
-	[ (1, OperandSubstitution::make_ref([
+	[ 1, vec![
 		None,
 		Some(("label1", 30))
-	]))];
+	]];
 
 	// Tests assembly can use a reference with multiple call argument flags
 	// E.g. "dup =>|=>|=>label, =>0"
 	[ parse_assembly_multiple_argument_flags ]
 	[ Instruction::Duplicate(false, 9.try_into().unwrap(), 0.try_into().unwrap()) ]
-	[ (1, OperandSubstitution::make_ref([
+	[ 1, vec![
 		None,
 		None,
 		Some(("label1", 16))
-	]))];
+	]];
 
 	// Tests assembly can use a reference with call argument flags after a jump
 	// E.g. "dec =>label1=>label2=>|=>label3"
 	[ parse_assembly_argument_flags_after_jump ]
 	[ Instruction::Pick(6.try_into().unwrap()) ]
-	[ (1, OperandSubstitution::make_ref([
+	[ 1, vec![
 		Some(("label1", 6)),
 		Some(("label2", 456)),
 		None,
 		Some(("label3", 462)),
-	]))];
+	]];
 )]
 #[test]
 fn name()
 {
 	let result = test_parse_assembly(AssemblyInstruction {
 		instruction: instr,
-		substitutions: vec![subs],
+		substitutions: OperandSubstitutions::from_reference(subs),
 		phantom: Default::default(),
 	});
 	assert!(!result.is_failure(), "{:?}", result);
@@ -231,29 +231,35 @@ fn error_only_in_instruction(
 /// Tests that the number of tokens and bytes consumed by parsing is exactly
 /// equal to the tokens in the instruction.
 /// I.e. ensures that tokens after the instruction are ignored.
-#[quickcheck]
 fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String) -> TestResult
 {
 	let (tokens, resolver) = assembly.tokens_and_resolver();
 
 	let instr_tokens: Vec<_> = tokens.split_ascii_whitespace().collect();
 	let extra_tokens: Vec<_> = extra.split_ascii_whitespace().collect();
+	let extra_start_with_var = extra
+		.trim_start()
+		.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.');
 
 	let chained = instr_tokens.iter().cloned().chain(extra_tokens.into_iter());
 
-	match assembly.substitutions.last()
+	if let Some((_, SubType::Ref(vec))) = assembly.substitutions.subs.iter().last()
 	{
-		Some((_, OperandSubstitution::Ref(ArbReference(vec))))
-			if vec.len() == 0
-				&& extra
-					.trim_start()
-					.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.') =>
+		if vec.len() == 0 && extra_start_with_var
 		{
 			// This will result in valid assembly, e.g. if extra is "x" or "0",
 			// the instruction will end on "=>x" or "=>0", which is valid.
 			return TestResult::discard();
-		},
-		_ => (),
+		}
+	}
+	if let Instruction::Request(imm) = assembly.instruction
+	{
+		if imm.value == 255 && extra_start_with_var
+		{
+			// Extra might result in valid request assembly that doesn't match
+			// the instruction (which has implicit operand) e.g., "req" + "0"
+			return TestResult::discard();
+		}
 	}
 
 	let (_, consumed) = Instruction::parse(chained, resolver).unwrap();
@@ -283,9 +289,30 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 	}
 }
 
+#[quickcheck]
+fn consumes_only_instruction_tokens_prop(assembly: AssemblyInstruction, extra: String)
+	-> TestResult
+{
+	consumes_only_instruction_tokens(assembly, extra)
+}
+
+#[test]
+fn consumes_only_instruction_tokens_1()
+{
+	let assembly = AssemblyInstruction {
+		instruction: Instruction::Request(255.try_into().unwrap()),
+		substitutions: OperandSubstitutions {
+			subs: HashMap::new(),
+			symbol_addrs: HashMap::new(),
+		},
+		phantom: PhantomData,
+	};
+	let result = consumes_only_instruction_tokens(assembly, "0".to_string());
+	assert!(!result.is_failure(), "{:?}", result);
+}
+
 /// Tests that all possible separator combinations are supported for any
 /// instruction with separators.
-#[quickcheck]
 fn different_separator_tokenization(
 	assembly: AssemblyInstruction,
 	t1: SeparatorType,
@@ -355,6 +382,16 @@ fn different_separator_tokenization(
 	{
 		TestResult::discard()
 	}
+}
+
+#[quickcheck]
+fn different_separator_tokenization_prop(
+	assembly: AssemblyInstruction,
+	t1: SeparatorType,
+	t_rest: Vec<SeparatorType>,
+) -> TestResult
+{
+	different_separator_tokenization(assembly, t1, t_rest)
 }
 
 /// Tests that if encounters an identifier that isn't an instruction, but does

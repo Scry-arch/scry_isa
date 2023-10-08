@@ -727,7 +727,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 				let mut result =
 					Then::<CallArgFlags, Then<Arrow, Symbol>>::parse::<_, F, _>(tokens.clone(), f)
 						.and_then(|((arg_flags, ((), sym1)), consumed)| {
-							f.borrow()(Resolve::DistanceCurrent(sym1))
+							f(Resolve::DistanceCurrent(sym1))
 								.map_err(|_| {
 									ParseError::from_consumed(
 										consumed.clone(),
@@ -787,7 +787,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								}
 								else
 								{
-									f.borrow()(Resolve::Distance(sym1, sym))
+									f(Resolve::Distance(sym1, sym))
 										.map_err(|unknown_sym| {
 											if unknown_sym == sym1
 											{
