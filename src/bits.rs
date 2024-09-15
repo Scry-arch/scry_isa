@@ -412,6 +412,22 @@ impl<const N: u32> TryFrom<BitsDyn<N>> for Bits<N, false>
 		}
 	}
 }
+impl<const N: u32> TryFrom<(bool, i32)> for BitsDyn<N>
+{
+	type Error = ();
+
+	fn try_from((signed, value): (bool, i32)) -> Result<Self, Self::Error>
+	{
+		if signed
+		{
+			Bits::<N, true>::try_from(value).map(|b| b.into())
+		}
+		else
+		{
+			Bits::<N, false>::try_from(value).map(|b| b.into())
+		}
+	}
+}
 /// Reinterprets 9 bits as 1 flag bit (the most significant) for whether the
 /// rest is signed.
 /// Used for decoding the "const" instruction

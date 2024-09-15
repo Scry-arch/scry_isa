@@ -12,7 +12,7 @@ use std::{
 pub enum ParseErrorType<'a>
 {
 	/// Couldn't resolve symbol
-	UnkownSymbol,
+	UnknownSymbol,
 
 	/// Invalid inputs.
 	///
@@ -36,7 +36,7 @@ pub enum ParseErrorType<'a>
 
 	/// Internal Error that shouldn't propagate outside the crate.
 	///
-	/// Please file a bug report with the given string refering to where in the
+	/// Please file a bug report with the given string referring to where in the
 	/// source the error originates.
 	InternalError(&'a str),
 }
@@ -73,13 +73,20 @@ pub struct ParseError<'a>
 }
 impl<'a> ParseError<'a>
 {
-	pub fn from_token(token: &str, idx: usize, err_type: ParseErrorType<'a>) -> Self
+	// Create error pointing to the given token, with the given token and index char
+	// starting points
+	pub fn from_token(
+		token: &str,
+		token_idx: usize,
+		char_idx: usize,
+		err_type: ParseErrorType<'a>,
+	) -> Self
 	{
 		Self {
-			start_token: idx,
-			start_idx: 0,
-			end_token: idx,
-			end_idx: token.len(),
+			start_token: token_idx,
+			start_idx: char_idx,
+			end_token: token_idx,
+			end_idx: char_idx + token.len(),
 			err_type,
 		}
 	}
@@ -192,7 +199,7 @@ impl CanConsume
 	/// Returns the consumed tokens/character counts and if the last token was
 	/// partially consumed, returns the remaining characters of that token
 	/// (since the whole token was consumed from the iterator but some of the
-	/// characters weren't). If the iterator is to be used for further parsin,
+	/// characters weren't). If the iterator is to be used for further parsing,
 	/// the returned characters should be prepended to the iterator first (as
 	/// their own token).
 	pub fn advance_iter_in_place<'a>(
@@ -289,6 +296,27 @@ impl Consumed
 			{
 				next.chars
 			},
+		}
+	}
+
+	// Advance error position based on this consumed and whether the last
+	// token was partially consumed
+	pub fn advance_err(&self, partial_consumed: bool, err: &mut ParseError)
+	{
+		err.start_token += self.tokens;
+		err.end_token += self.tokens;
+		if partial_consumed
+		{
+			if err.start_token > 0
+			{
+				err.start_token += 1;
+				err.end_token += 1;
+			}
+			else
+			{
+				err.start_idx += self.chars;
+				err.end_idx += self.chars;
+			}
 		}
 	}
 }
@@ -413,6 +441,7 @@ impl<'a> Parser<'a> for typ
 			.map_err(|_| {
 				ParseError::from_token(
 					value_string,
+					0,
 					0,
 					ParseErrorType::UnexpectedChars("unsigned integer"),
 				)
@@ -568,11 +597,11 @@ impl<'a> Parser<'a> for Symbol
 			ParseErrorType::UnexpectedChars("a symbol that start with a letter, '-', '_', or '.'");
 		tokens
 			.next()
-			.ok_or_else(|| ParseError::from_token("", 0, ParseErrorType::EndOfStream))
+			.ok_or_else(|| ParseError::from_token("", 0, 0, ParseErrorType::EndOfStream))
 			.and_then(|t| {
 				if t.starts_with(char::is_numeric)
 				{
-					Err(ParseError::from_token(t, 0, error_type.clone()))
+					Err(ParseError::from_token(t, 0, 0, error_type.clone()))
 				}
 				else
 				{
@@ -588,7 +617,7 @@ impl<'a> Parser<'a> for Symbol
 					.unwrap();
 				if sym.is_empty()
 				{
-					Err(ParseError::from_token(t, 0, error_type))
+					Err(ParseError::from_token(t, 0, 0, error_type))
 				}
 				else
 				{
@@ -628,7 +657,7 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 							(difference - ((difference > 0) as i32), consumed.clone())
 						})
 						.map_err(|_| {
-							ParseError::from_consumed(consumed, ParseErrorType::UnkownSymbol)
+							ParseError::from_consumed(consumed, ParseErrorType::UnknownSymbol)
 						})
 				})
 			})
@@ -717,6 +746,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 						Err(ParseError::from_token(
 							tokens.clone().next().unwrap().split_at(2).1,
 							consumed.tokens,
+							2,
 							ParseErrorType::from_bits::<SIZE, false>(value as isize),
 						))
 					},
@@ -731,7 +761,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 								.map_err(|_| {
 									ParseError::from_consumed(
 										consumed.clone(),
-										ParseErrorType::UnkownSymbol,
+										ParseErrorType::UnknownSymbol,
 									)
 								})
 								.and_then(|distance| {
@@ -761,7 +791,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 				{
 					result = Ok(((sym1, offset), consumed.clone()));
 					let sym1_unknown =
-						ParseError::from_consumed(consumed.clone(), ParseErrorType::UnkownSymbol);
+						ParseError::from_consumed(consumed.clone(), ParseErrorType::UnknownSymbol);
 					let (consumed, iter) = consumed.advance_iter(tokens.clone());
 					next_result =
 						Then::<CallArgFlags, Then<Arrow, Symbol>>::parse::<_, F, _>(iter, f)
@@ -797,7 +827,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 											{
 												ParseError::from_consumed(
 													consumed2.clone(),
-													ParseErrorType::UnkownSymbol,
+													ParseErrorType::UnknownSymbol,
 												)
 											}
 										})
@@ -1070,6 +1100,7 @@ impl<'a, T: Keyword> Parser<'a> for T
 					Err(ParseError::from_token(
 						t,
 						0,
+						0,
 						ParseErrorType::UnexpectedChars(T::WORD),
 					))
 				}
@@ -1128,7 +1159,7 @@ duplicate! {
 				} else {
 					Err(ParseError::from_token(
 						t,
-						0,
+						0,0,
 						ParseErrorType::UnexpectedChars(text),
 					))
 				})
@@ -1484,6 +1515,7 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 								.or(Err(ParseError::from_token(
 									value_str,
 									0,
+									0,
 									ParseErrorType::from_bits::<SIZE, false>(pow as isize),
 								)))
 								.map(|b| (b, CanConsume::chars(value_str.len())))
@@ -1534,6 +1566,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 					Err(ParseError::from_token(
 						token,
 						0,
+						0,
 						ParseErrorType::UnexpectedChars("integer scalar size"),
 					))
 				}
@@ -1541,6 +1574,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 					Bits::<3, false>::parse(Some(&token[1..]).into_iter(), f)
 						.map_err(|mut err| {
 							err.start_idx += 1;
+							err.end_idx += 1;
 							err
 						})
 						.map(|(b, consumed)| ((signed, b), CanConsume::chars(consumed.chars + 1)))
@@ -1569,84 +1603,69 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		IntSize::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
-			|((signed, pow2), consumed)| {
-				assert_eq!(consumed.tokens, 0);
+		Then::<IntSize, Comma>::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
+			|(((signed, pow2), _), consumed)| {
 				if SIZE >= 2u32.pow(pow2.value as u32)
 				{
-					let (consumed, tokens) = consumed.advance_iter(tokens);
-
-					let parsed_ref =
-						Then::<Then<Comma, Symbol>, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
-							tokens.clone(),
-							f.borrow(),
+					let mut tokens = tokens.clone();
+					let (consumed, partial) =
+						CanConsume::advance_iter_in_place(consumed, &mut tokens);
+					let was_partial = partial.is_some();
+					let tokens = partial.into_iter().chain(tokens);
+					Then::<Symbol, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
+						tokens.clone(),
+						f.borrow(),
+					)
+					.and_then(|((sym1, sym2), consumed2)| {
+						f.borrow()(
+							if let Some((_, sym2)) = sym2
+							{
+								Resolve::Distance(sym1, sym2)
+							}
+							else
+							{
+								Resolve::Address(sym1)
+							},
 						)
-						.and_then(|(((_, sym1), sym2), consumed2)| {
-							f.borrow()(
-								if let Some((_, sym2)) = sym2
-								{
-									Resolve::Distance(sym1, sym2)
-								}
-								else
-								{
-									Resolve::Address(sym1)
-								},
-							)
-							.map(|addr| (addr, consumed2.clone()))
-							.map_err(|_| {
-								ParseError::from_consumed(consumed2, ParseErrorType::UnkownSymbol)
-							})
-						});
-
-					if signed
-					{
-						parsed_ref
-							.map(|(val, consumed2)| {
-								(Bits::<SIZE, true>::try_from(val).unwrap().into(), consumed2)
-							})
-							.or_else(|_| {
-								Then::<Comma, Bits<SIZE, true>>::parse(tokens, f)
-									.map(|((_, b), consumed2)| (b.into(), consumed2))
-							})
-					}
-					else
-					{
-						parsed_ref
-							.map(|(val, consumed2)| {
-								(
-									Bits::<SIZE, false>::try_from(val).unwrap().into(),
-									consumed2,
-								)
-							})
-							.or_else(|_| {
-								Then::<Comma, Bits<SIZE, false>>::parse(tokens, f)
-									.map(|((_, b), consumed2)| (b.into(), consumed2))
-							})
-					}
-					.map(|(b, consumed2)| (b, consumed.then(&consumed2)))
-					.map_err(|err| {
-						let consumed_tok = consumed.tokens > 0;
-						ParseError {
-							start_token: err.start_token + consumed_tok as usize,
-							start_idx: if !consumed_tok && err.start_token == 0
-							{
-								err.start_idx + consumed.chars
-							}
-							else
-							{
-								err.start_idx
-							},
-							end_token: err.end_token + consumed_tok as usize,
-							end_idx: if !consumed_tok && err.start_token == 0
-							{
-								err.end_idx + consumed.chars
-							}
-							else
-							{
-								err.end_idx
-							},
-							err_type: err.err_type,
+						.map(|addr| (addr, consumed2.clone()))
+						.map_err(|_| {
+							ParseError::from_consumed(consumed2, ParseErrorType::UnknownSymbol)
+						})
+					})
+					.map(|(val, consumed2)| {
+						(
+							BitsDyn::<SIZE>::try_from((signed, val)).unwrap().into(),
+							consumed2,
+						)
+					})
+					.or_else(|err1| {
+						// Value is wrong, create sensible error by trying to parse
+						// again, guaranteeing an error
+						if signed
+						{
+							Bits::<SIZE, true>::parse(tokens, f)
+								.map(|(b, consumed2)| (b.into(), consumed2))
 						}
+						else
+						{
+							Bits::<SIZE, false>::parse(tokens, f)
+								.map(|(b, consumed2)| (b.into(), consumed2))
+						}
+						.or_else(|err2| {
+							Err(match (&err1.err_type, &err2.err_type)
+							{
+								(
+									ParseErrorType::UnknownSymbol,
+									ParseErrorType::UnexpectedChars(_),
+								) => err1,
+								_ => err2,
+							})
+						})
+					})
+					.map(|(b, consumed2)| (b, consumed.then(&consumed2)))
+					.map_err(|mut err| {
+						consumed.advance_err(was_partial, &mut err);
+						err
 					})
 				}
 				else
@@ -1728,6 +1747,7 @@ impl<'a> Parser<'a> for VecLength<'a>
 						{
 							Err(ParseError::from_token(
 								t,
+								0,
 								0,
 								ParseErrorType::UnexpectedChars(
 									"vector length as '_' or a power of 2",

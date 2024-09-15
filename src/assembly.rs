@@ -472,7 +472,7 @@ macro_rules! map_mnemonics_impl {
                             }
                         )))
                 }else {
-                    Err(ParseError::from_token(first_token, 0, ParseErrorType::UnexpectedChars("instruction mnemonic")))
+                    Err(ParseError::from_token(first_token, 0, 0, ParseErrorType::UnexpectedChars("instruction mnemonic")))
                 }
             }
 

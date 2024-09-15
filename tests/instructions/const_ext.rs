@@ -16,3 +16,29 @@ test_assembly! {
 	(10 start:3 end:24)
 	"const i0, end=>start" => "const i0, -21"
 }
+
+test_assembly_error! {
+	"const sadwij , 3" => ParseError {
+		start_token: 1, start_idx: 0, end_token: 1, end_idx: 6,
+		err_type: UnexpectedChars("integer scalar size") }
+	"const sadwij, 3" => ParseError {
+		start_token: 1, start_idx: 0, end_token: 1, end_idx: 7,
+		err_type: UnexpectedChars("integer scalar size") }
+
+	"const u0, unknown_label" => ParseError {
+		start_token: 2, start_idx: 0, end_token: 2, end_idx: 13,
+		err_type: UnknownSymbol }
+	"const i0, unknown_label" => ParseError {
+		start_token: 2, start_idx: 0, end_token: 2, end_idx: 13,
+		err_type: UnknownSymbol }
+	"const u0,unknown_label" => ParseError {
+		start_token: 1, start_idx: 3, end_token: 1, end_idx: 16,
+		err_type: UnknownSymbol }
+
+	"const u0 som_leb" => ParseError {
+		start_token: 2, start_idx: 0, end_token: 2, end_idx: 7,
+		err_type: UnexpectedChars(",") }
+	"const u1000 , unknown_label" => ParseError {
+		start_token: 1, start_idx: 1, end_token: 1, end_idx: 5,
+		err_type: OutOfBoundValue(1000, 0, 7) }
+}
