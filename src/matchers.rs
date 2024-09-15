@@ -57,7 +57,7 @@ impl<'a> ParseErrorType<'a>
 /// The span is a range of characters that parsing has deemed the source of the
 /// error. It starts in one token, at a specific index, and ranges to another
 /// token (or the same) at an index.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError<'a>
 {
 	/// The index of the first token in the span

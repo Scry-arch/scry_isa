@@ -47,6 +47,36 @@ fn test_case<'a, F, B>(
 	}
 }
 
+fn create_address_resolver<'a, const N: usize>(
+	current_addr: Option<i32>,
+	labels: [(&'a str, i32); N],
+) -> impl Fn(Resolve<'a>) -> Result<i32, &'a str>
+{
+	let addresses: HashMap<&'a str, i32> = labels.into();
+	move |resolve| {
+		match resolve
+		{
+			Resolve::Address(sym) => addresses.get(sym).cloned().ok_or(sym),
+			Resolve::Distance(sym1, sym2) =>
+			{
+				addresses.get(sym2).ok_or(sym2).and_then(|sym2_addr| {
+					addresses
+						.get(sym1)
+						.ok_or(sym1)
+						.and_then(|sym1_addr| Ok(sym2_addr - sym1_addr))
+				})
+			},
+			Resolve::DistanceCurrent(sym) =>
+			{
+				addresses
+					.get(sym)
+					.ok_or(sym)
+					.map(|addr| addr - current_addr.expect("No current address given"))
+			},
+		}
+	}
+}
+
 fn test_case2<'a, const N: usize>(
 	src: &'a str,
 	expected: &'a str,
@@ -55,32 +85,10 @@ fn test_case2<'a, const N: usize>(
 	current_addr: Option<i32>,
 )
 {
-	let addresses: HashMap<_, _> = labels.into();
 	test_case(
 		src,
 		expected,
-		|resolve| {
-			match resolve
-			{
-				Resolve::Address(sym) => addresses.get(sym).cloned().ok_or(sym),
-				Resolve::Distance(sym1, sym2) =>
-				{
-					addresses.get(sym2).ok_or(sym2).and_then(|sym2_addr| {
-						addresses
-							.get(sym1)
-							.ok_or(sym1)
-							.and_then(|sym1_addr| Ok(sym2_addr - sym1_addr))
-					})
-				},
-				Resolve::DistanceCurrent(sym) =>
-				{
-					addresses
-						.get(sym)
-						.ok_or(sym)
-						.map(|addr| addr - current_addr.expect("No current address given"))
-				},
-			}
-		},
+		create_address_resolver(current_addr, labels),
 		expected_bin,
 	);
 }
@@ -147,6 +155,31 @@ macro_rules! test_assembly {
 	) => {
 		$asm
 	};
+}
+
+macro_rules! test_assembly_error {
+	(
+		$(
+			$(($addr0:literal $($id1:ident: $addr1:literal)+))?
+			$asm:literal  => $expected_err:expr
+		)*
+	) => {
+		#[allow(unreachable_code)]
+		#[allow(unused_assignments)]
+		#[allow(unused_mut)]
+		#[allow(unused_variables)]
+		#[test]
+		fn assembly_error() {
+			use scry_isa::ParseErrorType;
+			use ParseErrorType::*;
+			$({
+				let mut addr0 = None;
+				$(addr0.replace($addr0);)?
+				let err = parse_assembly($asm, create_address_resolver(addr0, [$($((stringify!($id1), $addr1)),+)?]));
+				assert_eq!(err, Err($expected_err));
+			})*
+		}
+	}
 }
 
 mod alu;
