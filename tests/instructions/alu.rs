@@ -16,6 +16,8 @@ test_assembly! {
 	"ror =>12"
 	"ror =>13"
 	"mul =>10"
+	"and =>1"
+	"or =>2"
 
 	(10 target:12)
 	"inc =>target" => "inc =>0"
