@@ -269,7 +269,7 @@ impl OperandSubstitutions
 	/// Creates a substitution for the given index operand as a reference,
 	/// with each symbol given with its address.
 	///
-	/// Assumes all symbols are unique (no duplicates.
+	/// Assumes all symbols are unique (no duplicates).
 	pub fn from_reference(idx: usize, refs: Vec<Option<(&str, i32)>>) -> Self
 	{
 		let mut result = Self {
@@ -691,7 +691,7 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 							.find(|(i, _)| i == idx)
 							.unwrap()
 							.1 == 0;
-						if !value_zero || refs.len() > 1
+						if value_zero && refs.len() > 1
 						{
 							let mut instr_clone = self.instruction.clone();
 							let mut substitutions_clone = self.substitutions.clone();

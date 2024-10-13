@@ -3,7 +3,7 @@ use duplicate::duplicate_item;
 use quickcheck::TestResult;
 use scry_isa::{
 	arbitrary::{ArbSymbol, AssemblyInstruction, OperandSubstitutions, SubType},
-	AluVariant, Instruction, Parser, Resolve,
+	AluVariant, Bits, Instruction, ParseError, ParseErrorType, Parser, Resolve,
 };
 use std::{cell::Cell, collections::HashMap, convert::TryInto, marker::PhantomData};
 
@@ -80,6 +80,45 @@ fn parse_assembly(assembly: AssemblyInstruction) -> TestResult
 	test_parse_assembly(assembly)
 }
 
+/// Tests where the error is reported in "echo =>q=>q2=>q3" if q3 precedes q2
+#[test]
+fn parse_assembly_error_1()
+{
+	let assembly = AssemblyInstruction::<Instruction> {
+		instruction: Instruction::EchoLong(Bits::try_from(32).unwrap()),
+		substitutions: OperandSubstitutions {
+			subs: [(
+				1,
+				SubType::Ref(
+					[
+						Some(ArbSymbol("q".into())),
+						Some(ArbSymbol("q2".into())),
+						Some(ArbSymbol("q3".into())),
+					]
+					.into(),
+				),
+			)]
+			.into(),
+			symbol_addrs: [("q".into(), 66), ("q2".into(), 100), ("q3".into(), 50)].into(),
+		},
+		phantom: Default::default(),
+	};
+
+	let (tokens, resolver) = assembly.tokens_and_resolver();
+	assert_eq!(
+		Instruction::parse(tokens.split_ascii_whitespace(), resolver),
+		Err(ParseError {
+			start_token: 1,
+			start_idx: 7,
+			end_token: 1,
+			end_idx: 11,
+			err_type: ParseErrorType::Invalid(
+				"must be at or follow the instruction (or the previous symbol)"
+			),
+		})
+	)
+}
+
 /// Test specific cases of `parse_assembly`
 #[duplicate_item(
 	name	instr	subs;
@@ -148,6 +187,13 @@ fn parse_assembly(assembly: AssemblyInstruction) -> TestResult
 		Some(("label2", 456)),
 		None,
 		Some(("label3", 462)),
+	]];
+
+	// Tests assembly long echo
+	[ parse_assembly_echo_long ]
+	[ Instruction::EchoLong(32.try_into().unwrap()) ]
+	[ 1, vec![
+		Some(("label1", 66)),
 	]];
 )]
 #[test]

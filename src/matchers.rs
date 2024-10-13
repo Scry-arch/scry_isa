@@ -1,7 +1,13 @@
 use crate::{Alu2OutputVariant, BitValue, Bits, BitsDyn, Exclude};
 use duplicate::{duplicate, duplicate_item};
+use petgraph::{
+	algo::dijkstra::dijkstra,
+	graph::{Graph, NodeIndex},
+	Direction,
+};
 use std::{
 	borrow::Borrow,
+	collections::HashMap,
 	convert::{TryFrom, TryInto},
 	fmt::{Debug, Write},
 	marker::PhantomData,
@@ -161,7 +167,7 @@ impl<'a> ParseError<'a>
 
 /// Represents how many tokens and characters a parsing consumed.
 ///
-/// If less than 1 token was consumed, `tokens` will be 0, wile `chars` will
+/// If less than 1 token was consumed, `tokens` will be 0, while `chars` will
 /// contain the number if characters consumed from the first token.
 ///
 /// If only the first token was completely consumed, and no more characters were
@@ -284,6 +290,14 @@ pub struct Consumed
 
 impl Consumed
 {
+	pub fn none() -> Self
+	{
+		Self {
+			tokens: 0,
+			chars: 0,
+		}
+	}
+
 	pub fn then(&self, next: &CanConsume) -> CanConsume
 	{
 		CanConsume {
@@ -680,47 +694,331 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 	}
 }
 
-/// Used to parse call argument falgs in references ("=>|").
-///
-/// Parses as many consecutive flags as possible, returning the number of flag.
-/// If no flags are given, return 0. Cannot fail the parsing.
-pub struct CallArgFlags();
-impl<'a> Parser<'a> for CallArgFlags
+/// Defines the types of nodes of references.
+/// E.g. in "=>sym1=>|=>sym2=>1" "sym1", "|", "sym2" and "1" are nodes.
+#[derive(Debug)]
+pub enum ReferenceNode<'a>
 {
-	type Internal = u8;
+	/// A pseudo-node representing the start of the path.
+	/// Has no textual representation, but can be seen to precede the first "=>"
+	Root,
+
+	/// A node representing a position where a function call's argument are
+	/// given, I.e. "=>|"
+	CallArgFlag,
+
+	/// A node representing a symbol. I.e. "=>sym1"
+	Symbol(&'a str),
+
+	/// A node representing an integer offset from the previous node. I.e. "=>3"
+	Offset(i32),
+}
+
+impl<'a> Parser<'a> for ReferenceNode<'a>
+{
+	type Internal = Self;
 
 	const ALONE_LEFT: bool = false;
 	const ALONE_RIGHT: bool = false;
 
-	fn parse<I, F, B>(tokens: I, _: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
 	where
 		I: Iterator<Item = &'a str> + Clone,
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		let mut count = 0;
-		let mut total_consumed = CanConsume::none();
+		let f = f.borrow();
 
-		while let Ok((_, can_consume)) = Then::<Arrow, Pipe>::parse(
-			total_consumed.clone().advance_iter(tokens.clone()).1,
-			|_| unreachable!(),
-		)
-		{
-			let consumed = total_consumed.advance_iter(tokens.clone()).0;
-			total_consumed = consumed.then(&can_consume);
-			count += 1;
-		}
+		// Accept pipe as call argument signifier
+		Pipe::parse::<_, F, _>(tokens.clone(), f)
+			.map(|(_, consumed)| (ReferenceNode::CallArgFlag, consumed))
 
-		Ok((count, total_consumed))
+			// Accept positive integer as manual offset
+			.or_else(|_| {
+				u16::parse::<_, F, _>(tokens.clone(), f)
+					.map(|(val, consumed)| (ReferenceNode::Offset(val as i32), consumed))
+			})
+
+			// Accept a symbol
+			.or_else(|_| {
+				Symbol::parse::<_, F, _>(tokens.clone(), f)
+					.and_then(|(sym, consumed)|{
+						// Ensure symbol is known
+						f(Resolve::Address(sym)).map_err(|_| {
+							ParseError::from_consumed(
+								consumed.clone(),
+								ParseErrorType::UnknownSymbol,
+							)
+						})?;
+
+						Ok((ReferenceNode::Symbol(sym), consumed))
+					})
+			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		for _ in 0..*internal
+		let msg = match internal
 		{
-			out.write_str("=>|")?;
+			ReferenceNode::CallArgFlag => "|".into(),
+			ReferenceNode::Offset(x) => format!("{}", x),
+			ReferenceNode::Symbol(sym) => format!("{}", sym),
+			_ => unreachable!("unexpected reference node"),
+		};
+		out.write_str(msg.as_str())
+	}
+}
+
+/// Represents all the distinct paths in a reference.
+///
+/// These paths are most often a single list, e.g., "=>sym1=>sym2".
+/// However, using multi-pathing, these can become trees or DAGs.
+/// E.g. "=>sym1=>(sym2, sym3)" or "=>sym1=>(sym2, sym3)=>sym4"
+#[derive(Debug)]
+pub struct ReferenceDAG<'a>
+{
+	/// Holds the nodes and edges of the reference DAG
+	///
+	/// Included are the CanConsume for error reporting. It takes the start of
+	/// the reference as baseline and reaches just before the given node
+	graph: Graph<(ReferenceNode<'a>, Consumed, CanConsume), ()>,
+
+	/// The root of the DAG. Should always be [ReferenceNode::Root]
+	root: NodeIndex,
+}
+
+impl<'a> ReferenceDAG<'a>
+{
+	/// Creates a new, empty reference DAG, with a root
+	fn new() -> Self
+	{
+		let mut g = Graph::new();
+		let root = g.add_node((ReferenceNode::Root, Consumed::none(), CanConsume::none()));
+		Self { graph: g, root }
+	}
+
+	/// Add a path link
+	fn add_link(
+		&mut self,
+		source: NodeIndex,
+		target: ReferenceNode<'a>,
+		consumed: Consumed,
+		can_consume: CanConsume,
+	) -> NodeIndex
+	{
+		let target_node = self.graph.add_node((target, consumed, can_consume));
+		self.graph.add_edge(source, target_node, ());
+		target_node
+	}
+
+	/// Returns the root of the DAG
+	fn get_root(&self) -> NodeIndex
+	{
+		self.root
+	}
+
+	#[allow(dead_code)]
+	fn all_leaves(&self, source: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_
+	{
+		let leaves = self.graph.externals(Direction::Outgoing);
+		let paths: HashMap<NodeIndex, _> = dijkstra(&self.graph, source, None, |_| 1);
+		leaves.filter(move |l| paths.contains_key(l))
+	}
+
+	/// Returns all distinct lists of references in the DAG.
+	///
+	/// E.g., given "=>sym1=>(sym2, sym3)" returns "[=>sym1=>sym2,
+	/// =>sym1=>sym3]"
+	fn all_references_list(&self) -> impl Iterator<Item = impl Iterator<Item = NodeIndex>> + '_
+	{
+		let leaves = self.graph.externals(Direction::Outgoing);
+		leaves.flat_map(|l| {
+			petgraph::algo::simple_paths::all_simple_paths::<
+				Vec<_>,
+				&Graph<(ReferenceNode, _, _), ()>,
+			>(&self.graph, self.root, l, 0, None)
+			.map(|v| v.into_iter())
+		})
+	}
+
+	/// Returns the calculated offset of the reference.
+	///
+	/// If the distinct reference lists do not share the same offset, returns an
+	/// error. May also return errors if calculating the offset results in an
+	/// error. E.g. if a list is not valid.
+	fn calculate_reference_offset<'b, B, F>(&self, f: B) -> Result<i32, ParseError<'b>>
+	where
+		'a: 'b,
+		B: Borrow<F>,
+		F: Fn(Resolve<'b>) -> Result<i32, &'b str>,
+	{
+		let f = f.borrow();
+		let mut offset_result = None;
+
+		for ref_list in self.all_references_list()
+		{
+			let offset = ref_list
+				.fold(
+					Ok((0, false, None)),
+					|acumulate: Result<(i32, bool, Option<&str>), ParseError>, node| {
+						if let Err(err) = acumulate
+						{
+							Err(err)
+						}
+						else
+						{
+							let (offset, branch_to, last_symbol) = acumulate.unwrap();
+							use ReferenceNode::*;
+							Ok(match self.graph.node_weight(node).unwrap()
+							{
+								(Root, ..) => (offset, branch_to, last_symbol),
+								(CallArgFlag, ..) => (offset + 1, branch_to, last_symbol),
+								(Symbol(s), consumed, can_consumed) =>
+								{
+									let additional = if !branch_to
+									{
+										let (resolve, sub) = if let Some(last_sym) = last_symbol
+										{
+											(Resolve::Distance(last_sym, s), 0)
+										}
+										else
+										{
+											(Resolve::DistanceCurrent(s), 1)
+										};
+										let distance = f(resolve).expect(
+											"Internal scry_isa error: Unknown symbol in \
+											 ReferenceDAG",
+										);
+										if distance < 0
+										{
+											Err(ParseError {
+												start_token: consumed.tokens,
+												start_idx: consumed.chars,
+												end_token: consumed.tokens + can_consumed.tokens,
+												end_idx: if can_consumed.tokens >= 1
+												{
+													can_consumed.chars
+												}
+												else
+												{
+													consumed.chars + can_consumed.chars
+												},
+												err_type: ParseErrorType::Invalid(
+													"must be at or follow the instruction (or the \
+													 previous symbol)",
+												),
+											})?
+										}
+										(distance / 2) - sub
+									}
+									else
+									{
+										0
+									};
+									(offset + additional, !branch_to, Some(s))
+								},
+								(Offset(x), ..) => (offset + x, branch_to, last_symbol),
+							})
+						}
+					},
+				)?
+				.0;
+
+			if let Some(off) = offset_result
+			{
+				assert_eq!(offset, off);
+			}
+			else
+			{
+				offset_result = Some(offset);
+			}
 		}
-		Ok(())
+		Ok(offset_result.unwrap_or(0))
+	}
+}
+
+pub struct ReferenceDAGParser<const INIT_ARROW: bool>();
+impl<'a, const INIT_ARROW: bool> Parser<'a> for ReferenceDAGParser<INIT_ARROW>
+{
+	type Internal = ReferenceDAG<'a>;
+
+	const ALONE_LEFT: bool = false;
+	const ALONE_RIGHT: bool = false;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
+	{
+		let f = f.borrow();
+
+		let mut ref_dag = ReferenceDAG::<'a>::new();
+
+		let parse_node = |tokens,
+		                  ref_dag: &mut ReferenceDAG<'a>,
+		                  last_node,
+		                  prev_consume: Consumed,
+		                  with_arrow| {
+			if with_arrow
+			{
+				Then::<Arrow, ReferenceNode>::parse::<_, F, _>(tokens, f)
+					.map(|((_, node), consumed)| (node, consumed))
+			}
+			else
+			{
+				ReferenceNode::parse::<_, F, _>(tokens, f)
+			}
+			.and_then(|(node, consumed)| {
+				Ok((
+					ref_dag.add_link(last_node, node, prev_consume, consumed.clone()),
+					consumed,
+				))
+			})
+		};
+		let root_node = ref_dag.get_root();
+
+		// At least one "=>__" must be parsed
+		let (mut prev_node, mut can_consume) = match parse_node(
+			CanConsume::none().advance_iter(tokens.clone()).1,
+			&mut ref_dag,
+			root_node,
+			Consumed::none(),
+			INIT_ARROW,
+		)
+		{
+			Ok((node, consumed)) => (node, consumed),
+			Err(err) =>
+			{
+				// Accept lone arrow as "=>0"
+				if let (true, Ok((_, consumed))) = (INIT_ARROW, Arrow::parse::<_, F, _>(tokens, f))
+				{
+					return Ok((ref_dag, consumed));
+				}
+				else
+				{
+					return Err(err);
+				}
+			},
+		};
+
+		// Any number of additional "=>___" may be parsed
+		loop
+		{
+			let (consumed, tokens) = can_consume.clone().advance_iter(tokens.clone());
+			(prev_node, can_consume) =
+				match parse_node(tokens, &mut ref_dag, prev_node, consumed.clone(), true)
+				{
+					Ok((p, c)) => (p, consumed.then(&c)),
+					Err(_) => break,
+				}
+		}
+		Ok((ref_dag, can_consume))
+	}
+
+	fn print(_: &Self::Internal, _: &mut impl Write) -> std::fmt::Result
+	{
+		todo!()
 	}
 }
 
@@ -739,150 +1037,23 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
 		let f = f.borrow();
-		Then::<Arrow, u16>::parse::<_, F, _>(tokens.clone(), f)
-			.and_then(|(((), value), consumed)| {
-				(value as i32).try_into().map_or_else(
-					|_| {
-						Err(ParseError::from_token(
-							tokens.clone().next().unwrap().split_at(2).1,
-							consumed.tokens,
-							2,
-							ParseErrorType::from_bits::<SIZE, false>(value as isize),
-						))
-					},
-					|b| Ok((b, consumed.clone())),
-				)
-			})
-			.or_else(|mut err| {
-				let mut result =
-					Then::<CallArgFlags, Then<Arrow, Symbol>>::parse::<_, F, _>(tokens.clone(), f)
-						.and_then(|((arg_flags, ((), sym1)), consumed)| {
-							f(Resolve::DistanceCurrent(sym1))
-								.map_err(|_| {
-									ParseError::from_consumed(
-										consumed.clone(),
-										ParseErrorType::UnknownSymbol,
-									)
-								})
-								.and_then(|distance| {
-									let off1 = (distance / 2) - 1;
-									if off1 < 0
-									{
-										Err(ParseError {
-											start_token: consumed.tokens,
-											start_idx: 2 * ((consumed.tokens == 0) as usize),
-											end_token: consumed.tokens,
-											end_idx: (2 * ((consumed.tokens == 0) as usize))
-												+ sym1.len(),
-											err_type: ParseErrorType::Invalid(
-												"must be at or follow the instruction",
-											),
-										})
-									}
-									else
-									{
-										Ok(((sym1, off1 + (arg_flags as i32)), consumed))
-									}
-								})
-						});
-				let mut next_branch_to = true;
-				let mut next_result = result.clone();
-				while let Ok(((sym1, offset), consumed)) = next_result
-				{
-					result = Ok(((sym1, offset), consumed.clone()));
-					let sym1_unknown =
-						ParseError::from_consumed(consumed.clone(), ParseErrorType::UnknownSymbol);
-					let (consumed, iter) = consumed.advance_iter(tokens.clone());
-					next_result =
-						Then::<CallArgFlags, Then<Arrow, Symbol>>::parse::<_, F, _>(iter, f)
-							.and_then(|((arg_flags, ((), sym)), consumed2)| {
-								let next_consumed = consumed.then(&consumed2);
-
-								if next_branch_to
-								{
-									if arg_flags != 0
-									{
-										Err(ParseError::from_consumed(
-											consumed2,
-											ParseErrorType::Invalid(
-												"Cannot have call argument flags before a branch \
-												 target",
-											),
-										))
-									}
-									else
-									{
-										Ok(((sym, offset), next_consumed))
-									}
-								}
-								else
-								{
-									f(Resolve::Distance(sym1, sym))
-										.map_err(|unknown_sym| {
-											if unknown_sym == sym1
-											{
-												sym1_unknown
-											}
-											else
-											{
-												ParseError::from_consumed(
-													consumed2.clone(),
-													ParseErrorType::UnknownSymbol,
-												)
-											}
-										})
-										.and_then(|distance| {
-											let next_offset = distance / 2;
-											if next_offset < 0
-											{
-												Err(ParseError {
-													start_token: next_consumed.tokens
-														+ ((next_consumed.chars > 0) as usize),
-													start_idx: consumed.chars
-														* ((consumed2.tokens == 0) as usize),
-													end_token: next_consumed.tokens,
-													end_idx: sym.len()
-														+ (consumed.chars
-															* ((consumed2.tokens == 0) as usize)),
-													err_type: ParseErrorType::Invalid(
-														"must refer to an address higher than the \
-														 previous label in the chain",
-													),
-												})
-											}
-											else
-											{
-												Ok((
-													(
-														sym,
-														offset + next_offset + (arg_flags as i32),
-													),
-													next_consumed,
-												))
-											}
-										})
-								}
-							});
-					next_branch_to = !next_branch_to;
-				}
-				result.and_then(|((_, offset), consumed)| {
-					offset
-						.try_into()
-						.or({
-							err.replace_if_further(&ParseError::from_consumed(
-								consumed.clone(),
-								ParseErrorType::from_bits::<SIZE, false>(offset as isize),
-							));
-							Err(err)
-						})
-						.map(|b| (b, consumed))
-				})
-			})
-			.or_else(|err| {
-				Arrow::parse::<_, F, _>(tokens.clone(), f)
-					.and_then(|(_, consumed)| Ok((Bits::zero(), consumed)))
-					.map_err(|_| err)
-			})
+		ReferenceDAGParser::<true>::parse::<_, F, _>(tokens.clone(), f).and_then(
+			|(ref_dag, consumed)| {
+				ref_dag
+					.calculate_reference_offset::<_, F>(f)
+					.and_then(|value| {
+						Bits::try_from(value).map_or_else(
+							|_| {
+								Err(ParseError::from_consumed(
+									consumed.clone(),
+									ParseErrorType::from_bits::<SIZE, false>(value as isize),
+								))
+							},
+							|b| Ok((b, consumed.clone())),
+						)
+					})
+			},
+		)
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
