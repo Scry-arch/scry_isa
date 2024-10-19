@@ -453,17 +453,15 @@ macro_rules! map_mnemonics_impl {
                         unreachable!()
                     }
                     .map_or_else(
-                        |err: ParseError| Err(ParseError{
-                            start_token: err.start_token + (consumed_first as usize),
-                            start_idx: err.start_idx +
-                                (((!consumed_first && (err.start_token == 0)) as usize)
-                                    * mnemonic.len()),
-                            end_token: err.start_token + (consumed_first as usize),
-                            end_idx: err.end_idx +
-                                (((!consumed_first && (err.end_token == 0)) as usize)
-                                    * mnemonic.len()),
-                            err_type: err.err_type
-                        }),
+                        |mut err: ParseError| {
+                            let consumed = if consumed_first {
+                                Consumed{tokens: 1, chars: 0}
+                            } else {
+                                Consumed::none()
+                            };
+                            consumed.advance_err(&mut err);
+                            Err(err)
+						},
                         |(instr, consumed)| Ok((
                             instr,
                             CanConsume {
@@ -471,7 +469,7 @@ macro_rules! map_mnemonics_impl {
                                 chars: consumed.chars + (mnemonic.len()*(!(consumed_first && consumed.chars != 0) as usize))
                             }
                         )))
-                }else {
+                } else {
                     Err(ParseError::from_token(first_token, 0, 0, ParseErrorType::UnexpectedChars("instruction mnemonic")))
                 }
             }

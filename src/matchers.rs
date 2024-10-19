@@ -10,6 +10,7 @@ use std::{
 	collections::HashMap,
 	convert::{TryFrom, TryInto},
 	fmt::{Debug, Write},
+	iter::once,
 	marker::PhantomData,
 };
 
@@ -36,6 +37,21 @@ pub enum ParseErrorType<'a>
 	///
 	/// Given is a description of expected characters.
 	UnexpectedChars(&'a str),
+
+	/// Two references of unequal offsets were found.
+	///
+	/// 0. The offset of the first reference
+	/// 0. The offset of the second reference
+	/// 0. The nodes of the first reference
+	/// 0. The nodes of the second reference
+	UnequalReference(u32, u32, Vec<ReferenceNode<'a>>, Vec<ReferenceNode<'a>>),
+
+	/// An invalid reference was given
+	///
+	/// 0. The node index that is the source of the error (if it can be
+	///    identified
+	/// 0. The nodes of the relevant reference
+	InvalidReference(Option<u32>, Vec<ReferenceNode<'a>>),
 
 	/// Token stream ended unexpectedly.
 	EndOfStream,
@@ -315,23 +331,15 @@ impl Consumed
 
 	// Advance error position based on this consumed and whether the last
 	// token was partially consumed
-	pub fn advance_err(&self, partial_consumed: bool, err: &mut ParseError)
+	pub fn advance_err(&self, err: &mut ParseError)
 	{
+		if err.start_token == 0
+		{
+			err.start_idx += self.chars;
+			err.end_idx += self.chars;
+		}
 		err.start_token += self.tokens;
 		err.end_token += self.tokens;
-		if partial_consumed
-		{
-			if err.start_token > 0
-			{
-				err.start_token += 1;
-				err.end_token += 1;
-			}
-			else
-			{
-				err.start_idx += self.chars;
-				err.end_idx += self.chars;
-			}
-		}
 	}
 }
 
@@ -696,13 +704,9 @@ impl<'a, const SIZE: u32, const SIGNED: bool> Parser<'a> for Offset<SIZE, SIGNED
 
 /// Defines the types of nodes of references.
 /// E.g. in "=>sym1=>|=>sym2=>1" "sym1", "|", "sym2" and "1" are nodes.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReferenceNode<'a>
 {
-	/// A pseudo-node representing the start of the path.
-	/// Has no textual representation, but can be seen to precede the first "=>"
-	Root,
-
 	/// A node representing a position where a function call's argument are
 	/// given, I.e. "=>|"
 	CallArgFlag,
@@ -714,7 +718,25 @@ pub enum ReferenceNode<'a>
 	Offset(i32),
 }
 
-impl<'a> Parser<'a> for ReferenceNode<'a>
+#[derive(Debug)]
+pub enum ReferenceNodeParser<'a>
+{
+	/// A node representing a position where a function call's argument are
+	/// given, I.e. "=>|"
+	CallArgFlag,
+
+	/// A node representing a symbol. I.e. "=>sym1"
+	Symbol(&'a str),
+
+	/// A node representing an integer offset from the previous node. I.e. "=>3"
+	Offset(i32),
+
+	/// A node representing a branching the reference. I.e. "=>(target1,
+	/// target)"
+	Branch(ReferenceDAG<'a>),
+}
+
+impl<'a> Parser<'a> for ReferenceNodeParser<'a>
 {
 	type Internal = Self;
 
@@ -729,41 +751,189 @@ impl<'a> Parser<'a> for ReferenceNode<'a>
 	{
 		let f = f.borrow();
 
+		/// We have some errors below that are more "important" than others.
+		/// Using this enum allows us to identify them and propagate them.
+		/// E.g. unknown symbol errors should be preferred to the generic error
+		/// saying a node is expected.
+		///
+		/// The Primary error are expected to be propagated to instead of any
+		/// secondary errors
+		enum ErrLevel<E>
+		{
+			Primary(E),
+			Secondary(E),
+		}
+		impl<E> ErrLevel<E>
+		{
+			fn is_primary(&self) -> bool
+			{
+				match self
+				{
+					ErrLevel::Primary(_) => true,
+					ErrLevel::Secondary(_) => false,
+				}
+			}
+
+			fn get(self) -> E
+			{
+				match self
+				{
+					ErrLevel::Primary(e) | ErrLevel::Secondary(e) => e,
+				}
+			}
+		}
+		trait ErrorLevels<T, E>
+		{
+			/// Converts a normal parse result into one with error levels.
+			///
+			/// If true is given, the error is converted to a primary error
+			fn priority_error(self, prio: bool) -> Result<T, ErrLevel<E>>;
+		}
+		impl<T, E> ErrorLevels<T, E> for Result<T, E>
+		{
+			fn priority_error(self, prio: bool) -> Result<T, ErrLevel<E>>
+			{
+				match self
+				{
+					Ok(t) => Ok(t),
+					Err(e) =>
+					{
+						Err(
+							if prio
+							{
+								ErrLevel::Primary(e)
+							}
+							else
+							{
+								ErrLevel::Secondary(e)
+							},
+						)
+					},
+				}
+			}
+		}
+
 		// Accept pipe as call argument signifier
 		Pipe::parse::<_, F, _>(tokens.clone(), f)
-			.map(|(_, consumed)| (ReferenceNode::CallArgFlag, consumed))
+			.map(|(_, consumed)| (ReferenceNodeParser::CallArgFlag, consumed))
+			.priority_error(false)
 
 			// Accept positive integer as manual offset
 			.or_else(|_| {
 				u16::parse::<_, F, _>(tokens.clone(), f)
-					.map(|(val, consumed)| (ReferenceNode::Offset(val as i32), consumed))
+					.map(|(val, consumed)| (ReferenceNodeParser::Offset(val as i32), consumed))
 			})
+			.priority_error(false)
 
-			// Accept a symbol
 			.or_else(|_| {
-				Symbol::parse::<_, F, _>(tokens.clone(), f)
-					.and_then(|(sym, consumed)|{
-						// Ensure symbol is known
-						f(Resolve::Address(sym)).map_err(|_| {
-							ParseError::from_consumed(
-								consumed.clone(),
-								ParseErrorType::UnknownSymbol,
-							)
-						})?;
 
-						Ok((ReferenceNode::Symbol(sym), consumed))
-					})
+				// Accept a symbol
+				Symbol::parse::<_, F, _>(tokens.clone(), f)
+					.priority_error(false)
+					.map_or_else(
+
+						// If not a symbol try accepting a branch within parentheses
+						|_|{
+							// We need to call ReferenceDAGParser to parse the branched references
+							// However, it calls ReferenceNode for parsing already, resulting
+							// In an infinite type checking recursion. To avoid this, we need to
+							// use dynamic dispatch with the token iterator to break the recursion.
+							// However, since it needs Clone, and that would mean I is not object-safe,
+							// we use 'dyn_clone' to create an object safe version of I that can be boxed.
+							// See here: https://stackoverflow.com/a/50785654/8171453
+							use dyn_clone::{clone_trait_object, DynClone};
+							trait CloneableIterator<'b>: Iterator<Item = &'b str> + DynClone {}
+							impl<'b, T: Iterator<Item = &'b str> + DynClone> CloneableIterator<'b> for T {}
+							clone_trait_object!(<'b> CloneableIterator<'b>);
+
+							// We don't use one big "Then<..>" parse because we need to capture
+							// exact consumes for the two branches. So, we do everything manually
+							ParenLeft::parse::<_, F, _>(tokens.clone(), f)
+								.priority_error(false)
+								.and_then(move|(_, left_consume)|{
+									let (left_consumed, tokens2) = left_consume.advance_iter(tokens.clone());
+									let tokens2_box: Box<dyn CloneableIterator<'a>> = Box::new(tokens2);
+									ReferenceDAGParser::<false>::parse::<_, F, _>(tokens2_box, f)
+										.and_then(|(ref1, ref1_consume)|{
+											Ok((tokens, ref1, left_consumed.then(&ref1_consume)))
+										})
+										.map_err(|mut err| {
+											left_consumed.advance_err(&mut err);
+											err
+										})
+										.priority_error(true)
+								})
+								.and_then(|(tokens, ref_node, consume)| {
+									let (par_ref1_consumed, tokens3) = consume.advance_iter(tokens.clone());
+									Comma::parse::<_, F, _>(tokens3, f)
+										.and_then(|(_, comma_consume)| {
+											Ok((tokens, ref_node, par_ref1_consumed.then(&comma_consume)))
+										})
+										.map_err(|mut err| {
+											par_ref1_consumed.advance_err(&mut err);
+											err
+										})
+										.priority_error(true)
+								})
+								.and_then(|(tokens, mut ref_dag, consume)| {
+									let (left_ref1_comma_consumed, tokens4) = consume.advance_iter(tokens.clone());
+									let tokens4_boxed: Box<dyn CloneableIterator<'a>> = Box::new(tokens4);
+									ReferenceDAGParser::<false>::parse::<_, F, _>(tokens4_boxed, f)
+										.and_then(|(ref2, ref2_consume)|{
+											let _ = ref_dag.add_ref_dag(None, &ref2);
+
+											Ok((tokens, ref_dag, left_ref1_comma_consumed.then(&ref2_consume)))
+										})
+										.map_err(|mut err| {
+											left_ref1_comma_consumed.advance_err(&mut err);
+											err
+										})
+										.priority_error(true)
+								})
+								// Ensure the right parenthesis is present
+								.and_then(|(tokens, ref_dag, consume)| {
+									let (consumed, tokens2) = consume.advance_iter(tokens.clone());
+									ParenRight::parse::<_, F, _>(tokens2, f)
+										.map(|(_, consume2)| (ReferenceNodeParser::Branch(ref_dag), consumed.then(&consume2)))
+										.map_err(|mut err| {
+											consumed.advance_err(&mut err);
+											err
+										})
+										.priority_error(true)
+								})
+						},
+
+						// Ensure symbol is known
+						|(sym, consumed)|{
+							f(Resolve::Address(sym)).map_err(|_| {
+								ParseError::from_consumed(
+									consumed.clone(),
+									ParseErrorType::UnknownSymbol,
+								)
+							}).priority_error(true)?;
+
+							Ok((ReferenceNodeParser::Symbol(sym), consumed))
+						}
+					)
+			})
+			.map_err(|err| {
+				if err.is_primary() {
+					err.get()
+				} else {
+					ParseError::from_no_span(ParseErrorType::UnexpectedChars("'|', '(', unsigned integer, or symbol"))
+				}
 			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
+		use ReferenceNodeParser::*;
 		let msg = match internal
 		{
-			ReferenceNode::CallArgFlag => "|".into(),
-			ReferenceNode::Offset(x) => format!("{}", x),
-			ReferenceNode::Symbol(sym) => format!("{}", sym),
-			_ => unreachable!("unexpected reference node"),
+			CallArgFlag => "|".into(),
+			Offset(x) => format!("{}", x),
+			Symbol(sym) => format!("{}", sym),
+			Branch(dag) => format!("{:?}", dag),
 		};
 		out.write_str(msg.as_str())
 	}
@@ -781,10 +951,10 @@ pub struct ReferenceDAG<'a>
 	///
 	/// Included are the CanConsume for error reporting. It takes the start of
 	/// the reference as baseline and reaches just before the given node
-	graph: Graph<(ReferenceNode<'a>, Consumed, CanConsume), ()>,
+	graph: Graph<ReferenceNode<'a>, ()>,
 
 	/// The root of the DAG. Should always be [ReferenceNode::Root]
-	root: NodeIndex,
+	roots: Vec<NodeIndex>,
 }
 
 impl<'a> ReferenceDAG<'a>
@@ -792,29 +962,85 @@ impl<'a> ReferenceDAG<'a>
 	/// Creates a new, empty reference DAG, with a root
 	fn new() -> Self
 	{
-		let mut g = Graph::new();
-		let root = g.add_node((ReferenceNode::Root, Consumed::none(), CanConsume::none()));
-		Self { graph: g, root }
+		Self {
+			graph: Graph::new(),
+			roots: vec![],
+		}
+	}
+
+	/// Add a path link
+	fn add_compound_link(
+		&mut self,
+		source: Option<NodeIndex>,
+		target: &ReferenceNodeParser<'a>,
+	) -> impl Iterator<Item = NodeIndex>
+	{
+		match target
+		{
+			ReferenceNodeParser::Branch(ref_dag) =>
+			{
+				Box::new(self.add_ref_dag(source, ref_dag)) as Box<dyn Iterator<Item = NodeIndex>>
+			},
+			n =>
+			{
+				let new_node = match n
+				{
+					ReferenceNodeParser::CallArgFlag => ReferenceNode::CallArgFlag,
+					ReferenceNodeParser::Offset(x) => ReferenceNode::Offset(*x),
+					ReferenceNodeParser::Symbol(sym) => ReferenceNode::Symbol(*sym),
+					n => unreachable!("unexpected reference node: {:?}", n),
+				};
+
+				Box::new(self.add_link(source, new_node))
+			},
+		}
 	}
 
 	/// Add a path link
 	fn add_link(
 		&mut self,
-		source: NodeIndex,
+		source: Option<NodeIndex>,
 		target: ReferenceNode<'a>,
-		consumed: Consumed,
-		can_consume: CanConsume,
-	) -> NodeIndex
+	) -> impl Iterator<Item = NodeIndex>
 	{
-		let target_node = self.graph.add_node((target, consumed, can_consume));
-		self.graph.add_edge(source, target_node, ());
-		target_node
+		let target_node = self.graph.add_node(target);
+
+		if let Some(source) = source
+		{
+			assert!(self.graph.node_weight(source).is_some());
+			self.graph.add_edge(source, target_node, ());
+		}
+		else
+		{
+			self.roots.push(target_node);
+		}
+
+		Box::new(once(target_node))
+	}
+
+	fn add_ref_dag(
+		&mut self,
+		source: Option<NodeIndex>,
+		target: &ReferenceDAG<'a>,
+	) -> impl Iterator<Item = NodeIndex>
+	{
+		let mut leaves = vec![];
+		target.all_references_list().for_each(|path| {
+			let mut last = source;
+			for node in path.map(|idx| target.graph.node_weight(idx).unwrap())
+			{
+				last = Some(self.add_link(last, *node).next().unwrap());
+			}
+			leaves.push(last.unwrap());
+		});
+
+		leaves.into_iter()
 	}
 
 	/// Returns the root of the DAG
-	fn get_root(&self) -> NodeIndex
+	fn get_roots(&self) -> impl Iterator<Item = NodeIndex> + '_
 	{
-		self.root
+		self.roots.iter().cloned()
 	}
 
 	#[allow(dead_code)]
@@ -832,13 +1058,32 @@ impl<'a> ReferenceDAG<'a>
 	fn all_references_list(&self) -> impl Iterator<Item = impl Iterator<Item = NodeIndex>> + '_
 	{
 		let leaves = self.graph.externals(Direction::Outgoing);
-		leaves.flat_map(|l| {
-			petgraph::algo::simple_paths::all_simple_paths::<
-				Vec<_>,
-				&Graph<(ReferenceNode, _, _), ()>,
-			>(&self.graph, self.root, l, 0, None)
-			.map(|v| v.into_iter())
-		})
+		leaves
+			.clone()
+			.flat_map(move |l| {
+				self.get_roots()
+					.flat_map(move |root| {
+						petgraph::algo::simple_paths::all_simple_paths::<
+							Vec<_>,
+							&Graph<ReferenceNode, ()>,
+						>(&self.graph, root, l, 0, None)
+					})
+					.map(|v| v.into_iter())
+			})
+			.chain(
+				// 1-node paths will not produce a path in the above all_simple_paths call, so add
+				// them here as their own path
+				leaves.filter_map(|l| {
+					if self.get_roots().find(|r| *r == l).is_some()
+					{
+						Some(vec![l].into_iter())
+					}
+					else
+					{
+						None
+					}
+				}),
+			)
 	}
 
 	/// Returns the calculated offset of the reference.
@@ -846,21 +1091,30 @@ impl<'a> ReferenceDAG<'a>
 	/// If the distinct reference lists do not share the same offset, returns an
 	/// error. May also return errors if calculating the offset results in an
 	/// error. E.g. if a list is not valid.
-	fn calculate_reference_offset<'b, B, F>(&self, f: B) -> Result<i32, ParseError<'b>>
+	fn calculate_reference_offset<'b, B, F>(
+		&self,
+		f: B,
+		self_consume: CanConsume,
+	) -> Result<i32, ParseError<'b>>
 	where
 		'a: 'b,
 		B: Borrow<F>,
 		F: Fn(Resolve<'b>) -> Result<i32, &'b str>,
 	{
 		let f = f.borrow();
-		let mut offset_result = None;
+		let mut offset_result: Option<(_, Vec<&ReferenceNode>)> = None;
 
 		for ref_list in self.all_references_list()
 		{
-			let offset = ref_list
+			let path = ref_list
+				.map(|n| self.graph.node_weight(n).unwrap())
+				.collect::<Vec<_>>();
+			let offset = path
+				.iter()
+				.enumerate()
 				.fold(
 					Ok((0, false, None)),
-					|acumulate: Result<(i32, bool, Option<&str>), ParseError>, node| {
+					|acumulate: Result<(i32, bool, Option<&str>), ParseError>, (node_idx, node)| {
 						if let Err(err) = acumulate
 						{
 							Err(err)
@@ -869,11 +1123,10 @@ impl<'a> ReferenceDAG<'a>
 						{
 							let (offset, branch_to, last_symbol) = acumulate.unwrap();
 							use ReferenceNode::*;
-							Ok(match self.graph.node_weight(node).unwrap()
+							Ok(match node
 							{
-								(Root, ..) => (offset, branch_to, last_symbol),
-								(CallArgFlag, ..) => (offset + 1, branch_to, last_symbol),
-								(Symbol(s), consumed, can_consumed) =>
+								CallArgFlag => (offset + 1, branch_to, last_symbol),
+								Symbol(s) =>
 								{
 									let additional = if !branch_to
 									{
@@ -885,29 +1138,23 @@ impl<'a> ReferenceDAG<'a>
 										{
 											(Resolve::DistanceCurrent(s), 1)
 										};
-										let distance = f(resolve).expect(
-											"Internal scry_isa error: Unknown symbol in \
-											 ReferenceDAG",
-										);
+										let distance = f(resolve).map_err(|_| {
+											ParseError::from_consumed(
+												self_consume.clone(),
+												ParseErrorType::InternalError(
+													"ReferenceDag contains unknown symbol.",
+												),
+											)
+										})?;
 										if distance < 0
 										{
-											Err(ParseError {
-												start_token: consumed.tokens,
-												start_idx: consumed.chars,
-												end_token: consumed.tokens + can_consumed.tokens,
-												end_idx: if can_consumed.tokens >= 1
-												{
-													can_consumed.chars
-												}
-												else
-												{
-													consumed.chars + can_consumed.chars
-												},
-												err_type: ParseErrorType::Invalid(
-													"must be at or follow the instruction (or the \
-													 previous symbol)",
+											Err(ParseError::from_consumed(
+												self_consume.clone(),
+												ParseErrorType::InvalidReference(
+													Some(node_idx as u32),
+													path.iter().cloned().cloned().collect(),
 												),
-											})?
+											))?
 										}
 										(distance / 2) - sub
 									}
@@ -917,23 +1164,34 @@ impl<'a> ReferenceDAG<'a>
 									};
 									(offset + additional, !branch_to, Some(s))
 								},
-								(Offset(x), ..) => (offset + x, branch_to, last_symbol),
+								Offset(x) => (offset + x, branch_to, last_symbol),
 							})
 						}
 					},
 				)?
 				.0;
 
-			if let Some(off) = offset_result
+			if let Some((prev_off, prev_path)) = &offset_result
 			{
-				assert_eq!(offset, off);
+				if offset != *prev_off
+				{
+					Err(ParseError::from_consumed(
+						self_consume.clone(),
+						ParseErrorType::UnequalReference(
+							*prev_off as u32,
+							offset as u32,
+							prev_path.into_iter().cloned().cloned().collect(),
+							path.into_iter().cloned().collect(),
+						),
+					))?;
+				}
 			}
 			else
 			{
-				offset_result = Some(offset);
+				offset_result = Some((offset, path));
 			}
 		}
-		Ok(offset_result.unwrap_or(0))
+		Ok(offset_result.map(|(off, _)| off).unwrap_or(0))
 	}
 }
 
@@ -957,41 +1215,66 @@ impl<'a, const INIT_ARROW: bool> Parser<'a> for ReferenceDAGParser<INIT_ARROW>
 
 		let parse_node = |tokens,
 		                  ref_dag: &mut ReferenceDAG<'a>,
-		                  last_node,
+		                  prev_nodes: &Vec<NodeIndex>,
 		                  prev_consume: Consumed,
 		                  with_arrow| {
 			if with_arrow
 			{
-				Then::<Arrow, ReferenceNode>::parse::<_, F, _>(tokens, f)
+				Then::<Arrow, ReferenceNodeParser>::parse::<_, F, _>(tokens, f)
 					.map(|((_, node), consumed)| (node, consumed))
 			}
 			else
 			{
-				ReferenceNode::parse::<_, F, _>(tokens, f)
+				ReferenceNodeParser::parse::<_, F, _>(tokens, f)
 			}
-			.and_then(|(node, consumed)| {
+			.and_then(move |(node, consumed)| {
+				let consumed_clone = consumed.clone();
+
+				let prev_nodes = if prev_nodes.is_empty()
+				{
+					vec![None]
+				}
+				else
+				{
+					prev_nodes
+						.iter()
+						.map(|prev_node| Some(prev_node.clone()))
+						.collect()
+				};
+
 				Ok((
-					ref_dag.add_link(last_node, node, prev_consume, consumed.clone()),
-					consumed,
+					prev_nodes
+						.into_iter()
+						.flat_map(move |prev_node| ref_dag.add_compound_link(prev_node, &node))
+						.collect::<Vec<_>>(),
+					consumed_clone,
 				))
 			})
+			.map_err(|mut err| {
+				prev_consume.advance_err(&mut err);
+				err
+			})
 		};
-		let root_node = ref_dag.get_root();
 
 		// At least one "=>__" must be parsed
-		let (mut prev_node, mut can_consume) = match parse_node(
+		let (mut prev_nodes, mut can_consume) = match parse_node(
 			CanConsume::none().advance_iter(tokens.clone()).1,
 			&mut ref_dag,
-			root_node,
+			&vec![],
 			Consumed::none(),
 			INIT_ARROW,
 		)
 		{
-			Ok((node, consumed)) => (node, consumed),
+			Ok((nodes, consumed)) => (nodes, consumed),
 			Err(err) =>
 			{
-				// Accept lone arrow as "=>0"
-				if let (true, Ok((_, consumed))) = (INIT_ARROW, Arrow::parse::<_, F, _>(tokens, f))
+				// Accept lone arrow as "=>0", but only if not followed by "(", which means
+				// there is a branch
+				if let (true, Ok((_, consumed)), Err(_)) = (
+					INIT_ARROW,
+					Arrow::parse::<_, F, _>(tokens.clone(), f),
+					Then::<Arrow, ParenLeft>::parse::<_, F, _>(tokens, f),
+				)
 				{
 					return Ok((ref_dag, consumed));
 				}
@@ -1006,11 +1289,19 @@ impl<'a, const INIT_ARROW: bool> Parser<'a> for ReferenceDAGParser<INIT_ARROW>
 		loop
 		{
 			let (consumed, tokens) = can_consume.clone().advance_iter(tokens.clone());
-			(prev_node, can_consume) =
-				match parse_node(tokens, &mut ref_dag, prev_node, consumed.clone(), true)
+			(prev_nodes, can_consume) =
+				match parse_node(tokens, &mut ref_dag, &prev_nodes, consumed.clone(), true)
 				{
 					Ok((p, c)) => (p, consumed.then(&c)),
-					Err(_) => break,
+					Err(err) =>
+					{
+						// If an unknown symbol was found, return as hard error
+						if err.err_type == ParseErrorType::UnknownSymbol
+						{
+							return Err(err);
+						}
+						break;
+					},
 				}
 		}
 		Ok((ref_dag, can_consume))
@@ -1040,7 +1331,7 @@ impl<'a, const SIZE: u32> Parser<'a> for ReferenceParser<SIZE>
 		ReferenceDAGParser::<true>::parse::<_, F, _>(tokens.clone(), f).and_then(
 			|(ref_dag, consumed)| {
 				ref_dag
-					.calculate_reference_offset::<_, F>(f)
+					.calculate_reference_offset::<_, F>(f, consumed.clone())
 					.and_then(|value| {
 						Bits::try_from(value).map_or_else(
 							|_| {
@@ -1306,6 +1597,8 @@ duplicate! {
 		[Comma]	[","]		[true];
 		[Plus]	["+"]		[false];
 		[Pipe]	["|"]		[false];
+		[ParenLeft]	["("]		[false];
+		[ParenRight]	[")"]		[false];
 	]
 	pub struct name();
 	impl<'a> Parser<'a> for name
@@ -1778,11 +2071,7 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 			|(((signed, pow2), _), consumed)| {
 				if SIZE >= 2u32.pow(pow2.value as u32)
 				{
-					let mut tokens = tokens.clone();
-					let (consumed, partial) =
-						CanConsume::advance_iter_in_place(consumed, &mut tokens);
-					let was_partial = partial.is_some();
-					let tokens = partial.into_iter().chain(tokens);
+					let (consumed, tokens) = consumed.advance_iter(tokens.clone());
 					Then::<Symbol, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
 						tokens.clone(),
 						f.borrow(),
@@ -1835,7 +2124,7 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 					})
 					.map(|(b, consumed2)| (b, consumed.then(&consumed2)))
 					.map_err(|mut err| {
-						consumed.advance_err(was_partial, &mut err);
+						consumed.advance_err(&mut err);
 						err
 					})
 				}

@@ -161,7 +161,7 @@ macro_rules! test_assembly_error {
 	(
 		$(
 			$(($addr0:literal $($id1:ident: $addr1:literal)+))?
-			$asm:literal  => $expected_err:expr
+			$asm:literal  => $expected_err:expr;
 		)*
 	) => {
 		#[allow(unreachable_code)]
@@ -193,6 +193,7 @@ mod invalid;
 mod jmp;
 mod load;
 mod misc;
+mod multi_path_references;
 mod pick;
 mod req;
 mod ret;

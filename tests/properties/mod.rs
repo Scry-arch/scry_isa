@@ -3,7 +3,7 @@ use duplicate::duplicate_item;
 use quickcheck::TestResult;
 use scry_isa::{
 	arbitrary::{ArbSymbol, AssemblyInstruction, OperandSubstitutions, SubType},
-	AluVariant, Bits, Instruction, ParseError, ParseErrorType, Parser, Resolve,
+	AluVariant, Bits, Instruction, ParseError, ParseErrorType, Parser, ReferenceNode, Resolve,
 };
 use std::{cell::Cell, collections::HashMap, convert::TryInto, marker::PhantomData};
 
@@ -109,11 +109,16 @@ fn parse_assembly_error_1()
 		Instruction::parse(tokens.split_ascii_whitespace(), resolver),
 		Err(ParseError {
 			start_token: 1,
-			start_idx: 7,
+			start_idx: 0,
 			end_token: 1,
 			end_idx: 11,
-			err_type: ParseErrorType::Invalid(
-				"must be at or follow the instruction (or the previous symbol)"
+			err_type: ParseErrorType::InvalidReference(
+				Some(2),
+				vec!(
+					ReferenceNode::Symbol("q"),
+					ReferenceNode::Symbol("q2"),
+					ReferenceNode::Symbol("q3")
+				)
 			),
 		})
 	)
