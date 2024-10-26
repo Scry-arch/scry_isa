@@ -132,6 +132,9 @@ pub enum Instruction
 	/// The store instruction.
 	Store,
 
+	/// No-operation instruction.
+	NoOp,
+
 	/// The request instruction.
 	Request(Bits<8, false>),
 

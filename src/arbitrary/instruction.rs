@@ -53,9 +53,10 @@ impl Arbitrary for Instruction
 				)
 			},
 			11 => Store,
-			12 => Request(Arbitrary::arbitrary(g)),
-			13 => Constant(Arbitrary::arbitrary(g)),
-			14 => Invalid(0),
+			12 => NoOp,
+			13 => Request(Arbitrary::arbitrary(g)),
+			14 => Constant(Arbitrary::arbitrary(g)),
+			15 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}

@@ -2061,6 +2061,7 @@ map_mnemonics! {
 		> => ((*signed, *size), *target)
 	}
 	"st" (Store) [ 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 ]
+	"nop" (NoOp)  [ 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 ]
 	{
 		() = ()
 	}
