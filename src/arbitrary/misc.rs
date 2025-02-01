@@ -67,7 +67,8 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
-		| PickI(..) | Load(..) | Store | NoOp | Request(..) | Invalid(..) | Constant(..) => [].iter(),
+		| PickI(..) | Load(..) | Store(..) | NoOp | Request(..) | Invalid(..) | Constant(..)
+		| StackAddr(..) | StackRes(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -113,8 +114,8 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..) | Call(..) | Load(..) | Store | NoOp | Request(..) | Invalid(..)
-		| Constant(..) =>
+		Jump(..) | Call(..) | Load(..) | Store(..) | NoOp | Request(..) | Invalid(..)
+		| Constant(..) | StackAddr(..) | StackRes(..) =>
 		{
 			vec![]
 		},
@@ -123,9 +124,9 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 }
 
 #[duplicate_item(
-name						ref_type(inner);
-[get_reference_value]		[& inner];
-[get_reference_value_mut]	[&mut inner];
+	name						ref_type(inner);
+	[get_reference_value]		[& inner];
+	[get_reference_value_mut]	[&mut inner];
 )]
 pub fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 {

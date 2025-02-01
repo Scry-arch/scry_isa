@@ -52,11 +52,20 @@ impl Arbitrary for Instruction
 					Arbitrary::arbitrary(g),
 				)
 			},
-			11 => Store,
+			11 => Store(Arbitrary::arbitrary(g)),
 			12 => NoOp,
 			13 => Request(Arbitrary::arbitrary(g)),
 			14 => Constant(Arbitrary::arbitrary(g)),
-			15 => Invalid(0),
+			15 => StackAddr(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			16 =>
+			{
+				StackRes(
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+					Arbitrary::arbitrary(g),
+				)
+			},
+			17 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}

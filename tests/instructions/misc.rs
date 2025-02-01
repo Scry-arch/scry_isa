@@ -1,4 +1,3 @@
 test_assembly! {
-	"st" 	// Store
-	"nop"	// No-op
+	"nop "	// No-op
 }

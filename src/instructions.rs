@@ -127,10 +127,29 @@ pub enum Instruction
 	/// 0. Whether the loaded integer is signed or unsigned. `true` is signed.
 	/// 0. The scalar size to load as a power of two. I.e. 0 loads 1 byte, 1
 	/// loads 2 bytes, 2 loads 4 bytes, etc.
-	Load(bool, Bits<3, false>, Bits<5, false>),
+	/// 0. Stack index to load from. If =255 then not stack load
+	Load(bool, Bits<3, false>, Bits<8, false>),
 
 	/// The store instruction.
-	Store,
+	///
+	/// Fields:
+	/// 0. Stack index to save to. If =255 then not stack save
+	Store(Bits<8, false>),
+
+	/// The stack address instruction.
+	///
+	/// 0. The scalar size of the object as a power of two. I.e. 0 is 1 byte, 1
+	/// is 2 bytes, 2 is 4 bytes, etc.
+	/// 0. Stack index to get the address of. TODO: What if =255?
+	StackAddr(Bits<3, false>, Bits<8, false>),
+
+	/// The stack address instruction.
+	///
+	/// 0. Whether reserving or freeing the stack. `true`=reserving.
+	/// 0. Whether targeting primary or secondary stack frame. `true`=primary.
+	/// 0. Power of 2 amount of bytes to reserve or free. I.e. 0 is 1 byte, 1
+	/// is 2 bytes, 2 is 4 bytes, etc.
+	StackRes(bool, bool, Bits<4, false>),
 
 	/// No-operation instruction.
 	NoOp,

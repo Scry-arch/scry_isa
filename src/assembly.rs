@@ -479,11 +479,12 @@ macro_rules! map_mnemonics_impl {
                 use Instruction::*;
 
                 out.write_str(Instruction::mnemonic(internal))?;
+                out.write_char(' ')?;
 
                 match internal {
                     $(
                         $(
-                            $($instr)* => {<$parser_type>::print_with_whitespace(& $print_as,true, out)}
+                            $($instr)* => {<$parser_type>::print_with_whitespace(& $print_as,false, out)}
                         )+
                     )*
                 }
@@ -2053,15 +2054,21 @@ map_mnemonics! {
 			ReferenceParser<5>
 		> => (*imm, *target)
 	}
-	"ld" (Load(signed, size, target)) [ 0 0 0 1 1 1 0 [signed:1] [size:3] [target:5] ]
+	"ld"
+	(Load(signed, size, index)) [ 0 0 1 0 [signed:1] [size:3] [index:8] ]
 	{
-		((signed, size), target )<= CommaBetween<
+		((signed, size), ((),(index,())) )<= Then<
 			IntSize,
-			ReferenceParser<5>
-		> => ((*signed, *size), *target)
+			Then<BrackLeft, Then<Bits<8, false>, BrackRight>>
+		> => ((*signed, *size), ((),(*index,())))
 	}
-	"st" (Store) [ 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 ]
-	"nop" (NoOp)  [ 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 ]
+	"st" (Store(index)) [ 0 1 0 1 0 0 0 1 [index:8] ]
+	{
+		((),(index,())) <=
+			Then<BrackLeft, Then<Bits<8, false>, BrackRight>>
+		=> ((),(*index,()))
+	}
+	"nop" (NoOp)  [ 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ]
 	{
 		() = ()
 	}
@@ -2073,5 +2080,29 @@ map_mnemonics! {
 	(Constant(imm)) [ 0 0 0 0 0 0 1 [imm:9] ]
 	{
 		imm <= TypedConst<8> => (*imm)
+	}
+	"sadr"
+	(StackAddr(size, index)) [ 0 0 1 1 0 [size:3] [index:8] ]
+	{
+		((_, size), ((),(index,())) )<= Then<
+			IntSize,
+			Then<BrackLeft, Then<Bits<8, false>, BrackRight>>
+		> => ((false, *size), ((),(*index,())))
+	}
+	"rsrv"
+	(StackRes(true, prim, bytes)) [ 0 1 0 1 0 1 0 0 0 0 0 [prim:1] [bytes:4] ]
+	{
+		(prim, bytes)<= CommaBetween<
+			Flag<Primary,Secondary>,
+			Pow2<4>
+		> => (*prim, *bytes)
+	}
+	"free"
+	(StackRes(false, prim, bytes)) [ 0 1 0 1 0 1 0 0 0 0 1 [prim:1] [bytes:4] ]
+	{
+		(prim, bytes)<= CommaBetween<
+			Flag<Primary,Secondary>,
+			Pow2<4>
+		> => (*prim, *bytes)
 	}
 }

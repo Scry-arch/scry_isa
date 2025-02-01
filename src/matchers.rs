@@ -1582,6 +1582,8 @@ duplicate! {
 		[Low]	["Low"];
 		[Int]	["Int"];
 		[Uint]	["Uint"];
+		[Primary]	["Primary"];
+		[Secondary]	["Secondary"];
 	]
 	pub struct name();
 	impl Keyword for name
@@ -1599,6 +1601,8 @@ duplicate! {
 		[Pipe]	["|"]		[false];
 		[ParenLeft]	["("]		[false];
 		[ParenRight]	[")"]		[false];
+		[BrackLeft]	["["]		[false];
+		[BrackRight]	["]"]		[false];
 	]
 	pub struct name();
 	impl<'a> Parser<'a> for name
