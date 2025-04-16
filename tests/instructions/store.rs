@@ -15,4 +15,6 @@ test_assembly! {
 	"st [12]"
 	"st [14]"
 	"st [15]"
+	"st [255]" => "st "
+	"st "
 }

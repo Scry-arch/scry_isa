@@ -15,4 +15,6 @@ test_assembly! {
 	"ld i5[12]"
 	"ld i6[14]"
 	"ld i7[15]"
+	"ld i7[255]" => "ld i7"
+	"ld i7"
 }

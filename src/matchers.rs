@@ -2234,3 +2234,37 @@ impl<'a> Parser<'a> for VecLength<'a>
 		}
 	}
 }
+
+pub struct MemIndex<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for MemIndex<'a>
+{
+	type Internal = Bits<8, false>;
+
+	const ALONE_LEFT: bool = false;
+	const ALONE_RIGHT: bool = false;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
+	{
+		Then::<BrackLeft, Then<Bits<8, false>, BrackRight>>::parse(tokens.clone(), f)
+			.and_then(|(value, consumed)| Ok((value.1 .0, consumed)))
+			.or_else(|_| Ok((255.try_into().unwrap(), CanConsume::none())))
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		if !internal.is_max()
+		{
+			out.write_char('[')?;
+			Bits::<8, false>::print(internal, out)?;
+			out.write_char(']')
+		}
+		else
+		{
+			Ok(())
+		}
+	}
+}

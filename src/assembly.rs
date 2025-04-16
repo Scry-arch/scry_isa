@@ -2057,16 +2057,16 @@ map_mnemonics! {
 	"ld"
 	(Load(signed, size, index)) [ 0 0 1 0 [signed:1] [size:3] [index:8] ]
 	{
-		((signed, size), ((),(index,())) )<= Then<
+		((signed, size), index )<= Then<
 			IntSize,
-			Then<BrackLeft, Then<Bits<8, false>, BrackRight>>
-		> => ((*signed, *size), ((),(*index,())))
+			MemIndex
+		> => ((*signed, *size), *index)
 	}
 	"st" (Store(index)) [ 0 1 0 1 0 0 0 1 [index:8] ]
 	{
-		((),(index,())) <=
-			Then<BrackLeft, Then<Bits<8, false>, BrackRight>>
-		=> ((),(*index,()))
+		index <=
+			MemIndex
+		=> (*index)
 	}
 	"nop" (NoOp)  [ 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ]
 	{
