@@ -2090,19 +2090,19 @@ map_mnemonics! {
 		> => ((false, *size), ((),(*index,())))
 	}
 	"rsrv"
-	(StackRes(true, prim, bytes)) [ 0 1 0 1 0 1 0 0 0 0 0 [prim:1] [bytes:4] ]
+	(StackRes(true, bytes, base)) [ 0 1 0 1 0 1 0 0 0 0 0 [base:1] [bytes:4] ]
 	{
-		(prim, bytes)<= CommaBetween<
-			Flag<Primary,Secondary>,
-			Pow2<4>
-		> => (*prim, *bytes)
+		(bytes, base)<= Then<
+			Pow2<4>,
+			BoolFlag<Prefix<Comma, Base>>,
+		> => (*bytes, *base)
 	}
 	"free"
-	(StackRes(false, prim, bytes)) [ 0 1 0 1 0 1 0 0 0 0 1 [prim:1] [bytes:4] ]
+	(StackRes(false, bytes, base)) [ 0 1 0 1 0 1 0 0 0 0 1 [base:1] [bytes:4] ]
 	{
-		(prim, bytes)<= CommaBetween<
-			Flag<Primary,Secondary>,
-			Pow2<4>
-		> => (*prim, *bytes)
+		(bytes, base)<= Then<
+			Pow2<4>,
+			BoolFlag<Prefix<Comma, Base>>,
+		> => (*bytes, *base)
 	}
 }

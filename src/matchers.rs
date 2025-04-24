@@ -1582,8 +1582,7 @@ duplicate! {
 		[Low]	["Low"];
 		[Int]	["Int"];
 		[Uint]	["Uint"];
-		[Primary]	["Primary"];
-		[Secondary]	["Secondary"];
+		[Base]	["Base"];
 	]
 	pub struct name();
 	impl Keyword for name
@@ -1832,6 +1831,7 @@ impl<const SIZE: u32, const SIGNED: bool> From<&Bits<SIZE, SIGNED>> for (Bits<SI
 	}
 }
 
+/// Parses using the given parser and then calls try_into in the result to get T
 pub struct Flatten<'a, P: 'a + Parser<'a>, T>(PhantomData<&'a (P, T)>)
 where
 	T: TryFrom<P::Internal>,
@@ -2266,5 +2266,42 @@ impl<'a> Parser<'a> for MemIndex<'a>
 		{
 			Ok(())
 		}
+	}
+}
+
+/// Parses a valueless prefix before parsing the value
+pub struct Prefix<'a, P0: 'a + Parser<'a, Internal = ()>, P: 'a + Parser<'a>>(
+	PhantomData<&'a (P0, P)>,
+);
+impl<'a, P0: 'a + Parser<'a, Internal = ()>, P: 'a + Parser<'a>> Parser<'a> for Prefix<'a, P0, P>
+{
+	type Internal = P::Internal;
+
+	const ALONE_LEFT: bool = P0::ALONE_LEFT;
+	const ALONE_RIGHT: bool = P::ALONE_RIGHT;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
+	{
+		Then::<P0, P>::parse(tokens, f).map(|(value, consumed)| (value.1, consumed))
+	}
+
+	fn print_with_whitespace(
+		internal: &Self::Internal,
+		prev_alone: bool,
+		out: &mut impl Write,
+	) -> std::fmt::Result
+	{
+		P0::print_with_whitespace(&(), prev_alone, out)?;
+		P::print_with_whitespace(&internal, P::ALONE_RIGHT, out)
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl std::fmt::Write) -> std::fmt::Result
+	{
+		P0::print(&(), out)?;
+		P::print_with_whitespace(&internal, P::ALONE_RIGHT, out)
 	}
 }

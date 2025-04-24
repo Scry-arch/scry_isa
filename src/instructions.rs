@@ -146,10 +146,10 @@ pub enum Instruction
 	/// The stack address instruction.
 	///
 	/// 0. Whether reserving or freeing the stack. `true`=reserving.
-	/// 0. Whether targeting primary or secondary stack frame. `true`=primary.
 	/// 0. Power of 2 amount of bytes to reserve or free. I.e. 0 is 1 byte, 1
 	/// is 2 bytes, 2 is 4 bytes, etc.
-	StackRes(bool, bool, Bits<4, false>),
+	/// 0. Whether targeting base or total stack frame
+	StackRes(bool, Bits<4, false>, bool),
 
 	/// No-operation instruction.
 	NoOp,
