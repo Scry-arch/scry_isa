@@ -134,18 +134,18 @@ fn parse_assembly_error_1()
 	[ 1, vec![Some(("label", 12))] ];
 
 	// Tests assembly can use a reference to the first instruction after a control
-	// flow trigger E.g. "inc =>label1=>label2"
+	// flow trigger E.g. "Add =>label1=>label2"
 	[ parse_assembly_to_jump ]
-	[ Instruction::Alu(AluVariant::Inc, 12.try_into().unwrap()) ]
+	[ Instruction::Alu(AluVariant::Add, 12.try_into().unwrap()) ]
 	[ 1, vec![
 		Some(("label1", 26)),
 		Some(("label2", 124))
 	]];
 
 	// Tests assembly can use a reference to an offset after a control flow trigger
-	// E.g. "dec =>label1=>label2=>label3"
+	// E.g. "sub =>label1=>label2=>label3"
 	[ parse_assembly_to_after_jump ]
-	[ Instruction::Alu(AluVariant::Dec, 15.try_into().unwrap()) ]
+	[ Instruction::Alu(AluVariant::Sub, 15.try_into().unwrap()) ]
 	[ 1, vec![
 		Some(("label1", 26)),
 		Some(("label2", 124)),
@@ -165,9 +165,9 @@ fn parse_assembly_error_1()
 	]];
 
 	// Tests assembly can use a reference with a call argument flag
-	// E.g. "dec =>|=>label"
+	// E.g. "sub =>|=>label"
 	[ parse_assembly_argument_flag ]
-	[ Instruction::Alu(AluVariant::Dec, 15.try_into().unwrap()) ]
+	[ Instruction::Alu(AluVariant::Sub, 15.try_into().unwrap()) ]
 	[ 1, vec![
 		None,
 		Some(("label1", 30))

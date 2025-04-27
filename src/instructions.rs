@@ -6,9 +6,8 @@ use variant_count::VariantCount;
 duplicate! {
 	[
 		name 					variants;
-		[AluVariant]			[Inc, Dec, Add, Sub, ShiftLeft, ShiftRight, RotateLeft, RotateRight,
-									Mul, BitAnd, BitOr];
-		[Alu2Variant]			[Add, Sub, ShiftLeft, ShiftRight];
+		[AluVariant]			[Add, Sub, ShiftRight, RotateLeft, RotateRight, BitAnd, BitOr, Equal, LessThan, GreaterThan];
+		[Alu2Variant]			[Add, Sub, ShiftLeft, Multiply];
 		[Alu2OutputVariant]		[High, Low, FirstLow, FirstHigh, NextHigh, NextLow];
 		[CallVariant]			[Ret, Call]; //[, Portal, Ret, Trap]
 		[StackControlVariant] 	[Reserve, Free];
@@ -92,13 +91,16 @@ pub enum Instruction
 	/// The single-output ALU instruction.
 	///
 	/// Fields:
-	/// 0. Output target.
+	/// 0. Operation
+	/// 0. Output target
 	Alu(AluVariant, Bits<5, false>),
 
-	/// The single-output ALU instruction.
+	/// The double-output ALU instruction.
 	///
 	/// Fields:
-	/// 0. Output target.
+	/// 0. Operation
+	/// 0. Output type
+	/// 0. Output target
 	Alu2(Alu2Variant, Alu2OutputVariant, Bits<5, false>),
 
 	/// The call instruction.

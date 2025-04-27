@@ -2007,13 +2007,14 @@ map_mnemonics! {
 	{
 		target = ReferenceParser<10>
 	}
-	"inc"(Alu(AluVariant::Inc, target))             [ 1 0 0 0 0 0 0 0 [0 0 0]       [target:5]]
-	"dec"(Alu(AluVariant::Dec, target))             [ 1 0 0 0 0 0 0 1 [0 0 0]       [target:5]]
-	"rol"(Alu(AluVariant::RotateLeft, target))      [ 1 0 0 0 0 0 1 0 [0 0 0]       [target:5]]
-	"ror"(Alu(AluVariant::RotateRight, target))     [ 1 0 0 0 0 0 1 1 [0 0 0]       [target:5]]
+	"shr"(Alu(AluVariant::ShiftRight, target))      [ 1 0 0 0 0 0 0 1 [0 0 0]         [target:5]]
+	"rol"(Alu(AluVariant::RotateLeft, target))      [ 1 0 0 0 0 0 1 1 0 0 0         [target:5]]
+	"ror"(Alu(AluVariant::RotateRight, target))     [ 1 0 0 0 0 0 1 1 1 1 1         [target:5]]
 	"and"(Alu(AluVariant::BitAnd, target))          [ 1 0 0 0 0 1 0 1 0 0 0         [target:5]]
-	"or"(Alu(AluVariant::BitOr, target))            [ 1 0 0 0 0 1 0 1 0 0 1         [target:5]]
-	"mul"(Alu(AluVariant::Mul, target))             [ 1 0 0 0 0 1 1 1 0 0 0         [target:5]]
+	"or"(Alu(AluVariant::BitOr, target))            [ 1 0 0 0 0 1 0 1 1 1 1         [target:5]]
+	"eq"(Alu(AluVariant::Equal, target))            [ 1 0 0 0 0 0 0 0 [0 0 0]         [target:5]]
+	"lt"(Alu(AluVariant::LessThan, target))         [ 1 0 0 0 0 0 1 0 [0 0 0]         [target:5]]
+	"gt"(Alu(AluVariant::GreaterThan, target))      [ 1 0 0 0 0 0 1 0 [1 1 1]         [target:5]]
 	{
 		target = ReferenceParser<5>
 	}
@@ -2022,16 +2023,25 @@ map_mnemonics! {
 	(Alu2(Alu2Variant::Add, output, target))        [ 1 0 0 0 0 0 0 0 [output:3]    [target:5]]
 	"sub"
 	(Alu(AluVariant::Sub, target))                  [ 1 0 0 0 0 0 0 1 [1 1 1]       [target:5]]
-	(Alu2(Alu2Variant::Sub, output, target))        [ 1 0 0 0 0 0 0 1 [output:3]    [target:5]]
-	"shl"
-	(Alu(AluVariant::ShiftLeft, target))            [ 1 0 0 0 0 0 1 0 [1 1 1]       [target:5]]
-	(Alu2(Alu2Variant::ShiftLeft, output, target))  [ 1 0 0 0 0 0 1 0 [output:3]    [target:5]]
-	"shr"
-	(Alu(AluVariant::ShiftRight, target))           [ 1 0 0 0 0 0 1 1 [1 1 1]       [target:5]]
 	{
 		target = ReferenceParser<5>
 	}
-	(Alu2(Alu2Variant::ShiftRight, output, target)) [ 1 0 0 0 0 0 1 1 [output:3]    [target:5]]
+	(Alu2(Alu2Variant::Sub, output, target))        [ 1 0 0 0 0 0 0 1 [output:3]    [target:5]]
+	{
+		(output, target) <= CommaBetween<
+			Flatten<Then<
+				Flag<High, Low>,
+				Maybe<
+					Then<Flag<Arrow, Plus>, Flag<High, Low>>
+				>,
+			>, _>,
+			ReferenceParser<5>
+		> => (*output, *target)
+	}
+	"shl"
+	(Alu2(Alu2Variant::ShiftLeft, output, target))  [ 1 0 0 0 0 0 1 0 [output:3]    [target:5]]
+	"mul"
+	(Alu2(Alu2Variant::Multiply, output, target))  [ 1 0 0 0 0 1 0 0 [output:3]    [target:5]]
 	{
 		(output, target) <= CommaBetween<
 			Flatten<Then<
