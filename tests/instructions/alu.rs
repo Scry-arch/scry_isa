@@ -9,6 +9,8 @@ test_assembly! {
 	"sub =>5"
 	"eq =>6"
 	"eq =>7"
+	"shl =>4"
+	"shl =>29"
 	"shr =>8"
 	"shr =>9"
 	"rol =>10"

@@ -2007,14 +2007,15 @@ map_mnemonics! {
 	{
 		target = ReferenceParser<10>
 	}
+	"shl"(Alu(AluVariant::ShiftLeft, target))       [ 1 0 0 0 0 1 0 0 [0 0 0]         [target:5]]
 	"shr"(Alu(AluVariant::ShiftRight, target))      [ 1 0 0 0 0 0 0 1 [0 0 0]         [target:5]]
 	"rol"(Alu(AluVariant::RotateLeft, target))      [ 1 0 0 0 0 0 1 1 0 0 0         [target:5]]
 	"ror"(Alu(AluVariant::RotateRight, target))     [ 1 0 0 0 0 0 1 1 1 1 1         [target:5]]
 	"and"(Alu(AluVariant::BitAnd, target))          [ 1 0 0 0 0 1 0 1 0 0 0         [target:5]]
 	"or"(Alu(AluVariant::BitOr, target))            [ 1 0 0 0 0 1 0 1 1 1 1         [target:5]]
 	"eq"(Alu(AluVariant::Equal, target))            [ 1 0 0 0 0 0 0 0 [0 0 0]         [target:5]]
-	"lt"(Alu(AluVariant::LessThan, target))         [ 1 0 0 0 0 0 1 0 [0 0 0]         [target:5]]
-	"gt"(Alu(AluVariant::GreaterThan, target))      [ 1 0 0 0 0 0 1 0 [1 1 1]         [target:5]]
+	"lt"(Alu(AluVariant::LessThan, target))         [ 1 0 0 0 0 0 1 0 0 0 0         [target:5]]
+	"gt"(Alu(AluVariant::GreaterThan, target))      [ 1 0 0 0 0 0 1 0 1 1 1         [target:5]]
 	{
 		target = ReferenceParser<5>
 	}
@@ -2038,8 +2039,6 @@ map_mnemonics! {
 			ReferenceParser<5>
 		> => (*output, *target)
 	}
-	"shl"
-	(Alu2(Alu2Variant::ShiftLeft, output, target))  [ 1 0 0 0 0 0 1 0 [output:3]    [target:5]]
 	"mul"
 	(Alu2(Alu2Variant::Multiply, output, target))  [ 1 0 0 0 0 1 0 0 [output:3]    [target:5]]
 	{
