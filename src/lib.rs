@@ -9,6 +9,7 @@ mod bits;
 mod instructions;
 mod matchers;
 
+pub use assembly::*;
 pub use bits::*;
 pub use instructions::*;
 pub use matchers::*;

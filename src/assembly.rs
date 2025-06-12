@@ -368,7 +368,7 @@ macro_rules! map_mnemonics_impl {
             ])+
         ])*
     ) => {
-        const INSTRUCTION_MNEMONICS: &'static [&'static str] = &[
+        pub const INSTRUCTION_MNEMONICS: &'static [&'static str] = &[
             $($mnem,)*
         ];
 
