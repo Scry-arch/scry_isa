@@ -2064,18 +2064,30 @@ map_mnemonics! {
 		> => (*imm, *target)
 	}
 	"ld"
-	(Load(signed, size, index)) [ 0 0 1 0 [signed:1] [size:3] [index:8] ]
+	(Load(false, type_f, offset)) [ 0 0 1 0 0 0 0 [type_f:4] [offset:5] ]
 	{
-		((signed, size), index )<= Then<
-			IntSize,
-			MemIndex
-		> => ((*signed, *size), *index)
+		(type_f, offset )<= CommaBetween<
+			TypeMatcher,
+			ReferenceParser<5>
+		> => (*type_f, *offset)
 	}
-	"st" (Store(index)) [ 0 1 0 1 0 0 0 1 [index:8] ]
+	(Load(true, type_f, index)) [ 0 0 1 0 0 1 0 [type_f:4] [index:5] ]
+	{
+		(type_f, index )<= Then<
+			TypeMatcher,
+			MemIndex
+		> => (*type_f, *index)
+	}
+	"st"
+	(StoreStack(index)) [ 0 0 0 0 0 0 0 0 0 1 1 [index:5] ]
 	{
 		index <=
 			MemIndex
 		=> (*index)
+	}
+	(Store) [ 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 ]
+	{
+		() = ()
 	}
 	"nop" (NoOp)  [ 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ]
 	{
@@ -2091,12 +2103,12 @@ map_mnemonics! {
 		imm <= TypedConst<8> => (*imm)
 	}
 	"sadr"
-	(StackAddr(size, index)) [ 0 0 1 1 0 [size:3] [index:8] ]
+	(StackAddr(size, index)) [ 0 0 1 1 0 0 0 0 0 [size:2] [index:5] ]
 	{
-		((_, size), ((),(index,())) )<= Then<
-			IntSize,
-			Then<BrackLeft, Then<Bits<8, false>, BrackRight>>
-		> => ((false, *size), ((),(*index,())))
+		(size, index )<= Then<
+			Bits<2, false>,
+			MemIndex
+		> => (*size, *index)
 	}
 	"rsrv"
 	(StackRes(true, bytes, base)) [ 0 1 0 1 0 1 0 0 0 0 0 [base:1] [bytes:4] ]

@@ -42,6 +42,88 @@ pub enum InstructionFormat
 	Doub(Bits<5, false>, Bits<5, false>),
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Type
+{
+	/// Unsigned integer of the given power of 2. I.e., 0 is 1 byte, 1 is 2
+	/// bytes, etc.
+	Uint(u8),
+	/// Signed integer of the given power of 2. I.e., 0 is 1 byte, 1 is 2 bytes,
+	/// etc.
+	Int(u8),
+}
+impl Type
+{
+	/// Returns the power of 2 size of this type.
+	pub fn size_pow2(&self) -> u8
+	{
+		*match self
+		{
+			Type::Uint(x) if x < &4 => x,
+			Type::Int(x) if x < &4 => x,
+			_ => unreachable!("Invalid type size: {:?}", self),
+		}
+	}
+
+	/// Returns the size of this type in bytes
+	pub fn size(&self) -> usize
+	{
+		2u32.pow(self.size_pow2() as u32) as usize
+	}
+
+	pub fn is_signed_int(&self) -> bool
+	{
+		if let Type::Int(_) = self
+		{
+			true
+		}
+		else
+		{
+			false
+		}
+	}
+
+	pub fn is_unsigned_int(&self) -> bool
+	{
+		if let Type::Uint(_) = self
+		{
+			true
+		}
+		else
+		{
+			false
+		}
+	}
+}
+impl TryFrom<Type> for Bits<4, false>
+{
+	type Error = ();
+
+	fn try_from(ty: Type) -> Result<Self, Self::Error>
+	{
+		match ty
+		{
+			Type::Uint(x) if x < 4 => Ok((x as i32).try_into().unwrap()),
+			Type::Int(x) if x < 4 => Ok(((4 + x) as i32).try_into().unwrap()),
+			_ => Err(()),
+		}
+	}
+}
+impl TryFrom<Bits<4, false>> for Type
+{
+	type Error = ();
+
+	fn try_from(bits: Bits<4, false>) -> Result<Self, Self::Error>
+	{
+		match bits.value
+		{
+			0..4 => Ok(Type::Uint(bits.value as u8)),
+			4..8 => Ok(Type::Int(bits.value as u8 - 4)),
+			_ => Err(()),
+		}
+	}
+}
+
 /// All instructions
 #[derive(Debug, Clone, Eq, PartialEq, VariantCount)]
 pub enum Instruction
@@ -126,24 +208,25 @@ pub enum Instruction
 	/// The integer load instruction.
 	///
 	/// Fields:
-	/// 0. Whether the loaded integer is signed or unsigned. `true` is signed.
-	/// 0. The scalar size to load as a power of two. I.e. 0 loads 1 byte, 1
-	/// loads 2 bytes, 2 loads 4 bytes, etc.
-	/// 0. Stack index to load from. If =255 then not stack load
-	Load(bool, Bits<3, false>, Bits<8, false>),
+	/// 0. Whether the load is stack-based or not. True is stack-based.
+	/// 0. The type to be loaded.
+	/// 0. Stack index to load from or output offset.
+	Load(bool, Bits<4, false>, Bits<5, false>),
 
 	/// The store instruction.
+	Store,
+
+	/// The stack store instruction.
 	///
-	/// Fields:
-	/// 0. Stack index to save to. If =255 then not stack save
-	Store(Bits<8, false>),
+	/// 0. The index to store at
+	StoreStack(Bits<5, false>),
 
 	/// The stack address instruction.
 	///
 	/// 0. The scalar size of the object as a power of two. I.e. 0 is 1 byte, 1
 	/// is 2 bytes, 2 is 4 bytes, etc.
-	/// 0. Stack index to get the address of. TODO: What if =255?
-	StackAddr(Bits<3, false>, Bits<8, false>),
+	/// 0. Stack index to get the address of.
+	StackAddr(Bits<2, false>, Bits<5, false>),
 
 	/// The stack address instruction.
 	///

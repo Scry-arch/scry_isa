@@ -1,4 +1,4 @@
-use crate::{Alu2OutputVariant, BitValue, Bits, BitsDyn, Exclude};
+use crate::{Alu2OutputVariant, BitValue, Bits, BitsDyn, Exclude, Type};
 use duplicate::{duplicate, duplicate_item};
 use petgraph::{
 	algo::dijkstra::dijkstra,
@@ -2003,10 +2003,10 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 	}
 }
 
-pub struct IntSize<'a>(PhantomData<&'a ()>);
-impl<'a> Parser<'a> for IntSize<'a>
+pub struct TypeMatcher<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for TypeMatcher<'a>
 {
-	type Internal = (bool, Bits<3, false>);
+	type Internal = Bits<4, false>;
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
@@ -2039,7 +2039,7 @@ impl<'a> Parser<'a> for IntSize<'a>
 					))
 				}
 				.and_then(|signed| {
-					Bits::<3, false>::parse(Some(&token[1..]).into_iter(), f)
+					Bits::<2, false>::parse(Some(&token[1..]).into_iter(), f)
 						.map_err(|mut err| {
 							err.start_idx += 1;
 							err.end_idx += 1;
@@ -2047,13 +2047,39 @@ impl<'a> Parser<'a> for IntSize<'a>
 						})
 						.map(|(b, consumed)| ((signed, b), CanConsume::chars(consumed.chars + 1)))
 				})
+				.and_then(|((signed, size), consumed)| {
+					if signed
+					{
+						Type::Int(size.value as u8)
+					}
+					else
+					{
+						Type::Uint(size.value as u8)
+					}
+					.try_into()
+					.map(|t| (t, consumed))
+					.map_err(|_| {
+						ParseError::from_token(
+							token,
+							0,
+							1,
+							ParseErrorType::OutOfBoundValue(size.value as isize, 0, 3),
+						)
+					})
+				})
 			})
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		out.write_char(if internal.0 { 'i' } else { 'u' })?;
-		Bits::<3, false>::print(&internal.1, out)
+		let (signed, size) = match (*internal).try_into().unwrap()
+		{
+			Type::Int(x) => (true, x),
+			Type::Uint(x) => (false, x),
+		};
+
+		out.write_char(if signed { 'i' } else { 'u' })?;
+		Bits::<2, false>::print(&(size as i32).try_into().unwrap(), out)
 	}
 }
 
@@ -2071,9 +2097,10 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		Then::<IntSize, Comma>::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
-			|(((signed, pow2), _), consumed)| {
-				if SIZE >= 2u32.pow(pow2.value as u32)
+		Then::<TypeMatcher, Comma>::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
+			|((ty, _), consumed)| {
+				let ty: Type = ty.try_into().unwrap();
+				if SIZE >= ty.size() as u32
 				{
 					let (consumed, tokens) = consumed.advance_iter(tokens.clone());
 					Then::<Symbol, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
@@ -2098,14 +2125,16 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 					})
 					.map(|(val, consumed2)| {
 						(
-							BitsDyn::<SIZE>::try_from((signed, val)).unwrap().into(),
+							BitsDyn::<SIZE>::try_from((ty.is_signed_int(), val))
+								.unwrap()
+								.into(),
 							consumed2,
 						)
 					})
 					.or_else(|err1| {
 						// Value is wrong, create sensible error by trying to parse
 						// again, guaranteeing an error
-						if signed
+						if ty.is_signed_int()
 						{
 							Bits::<SIZE, true>::parse(tokens, f)
 								.map(|(b, consumed2)| (b.into(), consumed2))
@@ -2140,7 +2169,7 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 						end_token: 0,
 						end_idx: consumed.chars,
 						// TODO: should handle higher powers of 2
-						err_type: ParseErrorType::OutOfBoundValue(pow2.value as isize, 0, 0),
+						err_type: ParseErrorType::OutOfBoundValue(ty.size_pow2() as isize, 0, 0),
 					})
 				}
 			},
@@ -2152,16 +2181,16 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 		assert!(SIZE >= 8); // TODO: support higher bit lengths
 		if let Ok(bits) = internal.clone().try_into()
 		{
-			CommaBetween::<IntSize, Bits<SIZE, true>>::print(
-				&((true, 0i32.try_into().unwrap()), bits),
+			CommaBetween::<TypeMatcher, Bits<SIZE, true>>::print(
+				&(Type::Int(0).try_into().unwrap(), bits),
 				out,
 			)
 		}
 		else
 		{
-			CommaBetween::<IntSize, Bits<SIZE, false>>::print(
+			CommaBetween::<TypeMatcher, Bits<SIZE, false>>::print(
 				&(
-					(false, 0i32.try_into().unwrap()),
+					Type::Uint(0).try_into().unwrap(),
 					internal.clone().try_into().unwrap(),
 				),
 				out,
@@ -2238,7 +2267,7 @@ impl<'a> Parser<'a> for VecLength<'a>
 pub struct MemIndex<'a>(PhantomData<&'a ()>);
 impl<'a> Parser<'a> for MemIndex<'a>
 {
-	type Internal = Bits<8, false>;
+	type Internal = Bits<5, false>;
 
 	const ALONE_LEFT: bool = false;
 	const ALONE_RIGHT: bool = false;
@@ -2249,23 +2278,15 @@ impl<'a> Parser<'a> for MemIndex<'a>
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		Then::<BrackLeft, Then<Bits<8, false>, BrackRight>>::parse(tokens.clone(), f)
+		Then::<BrackLeft, Then<Bits<5, false>, BrackRight>>::parse(tokens.clone(), f)
 			.and_then(|(value, consumed)| Ok((value.1 .0, consumed)))
-			.or_else(|_| Ok((255.try_into().unwrap(), CanConsume::none())))
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		if !internal.is_max()
-		{
-			out.write_char('[')?;
-			Bits::<8, false>::print(internal, out)?;
-			out.write_char(']')
-		}
-		else
-		{
-			Ok(())
-		}
+		out.write_char('[')?;
+		Bits::<5, false>::print(internal, out)?;
+		out.write_char(']')
 	}
 }
 

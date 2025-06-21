@@ -1,10 +1,33 @@
 use crate::{
 	arbitrary::*, Alu2OutputVariant, Alu2Variant, AluVariant, CallVariant, Instruction,
-	StackControlVariant,
+	StackControlVariant, Type,
 };
 use duplicate::duplicate;
 use quickcheck::{Arbitrary, Gen};
-use std::fmt::Debug;
+use std::{fmt::Debug, iter::once};
+
+impl Arbitrary for Type
+{
+	fn arbitrary(g: &mut Gen) -> Self
+	{
+		let signed = bool::arbitrary(g);
+		let size = u8::arbitrary(g) % 4;
+
+		if signed
+		{
+			Type::Int(size)
+		}
+		else
+		{
+			Type::Uint(size)
+		}
+	}
+
+	fn shrink(&self) -> Box<dyn Iterator<Item = Self>>
+	{
+		Box::new(once(self.clone()))
+	}
+}
 
 impl Arbitrary for Instruction
 {
@@ -48,16 +71,17 @@ impl Arbitrary for Instruction
 			{
 				Load(
 					Arbitrary::arbitrary(g),
-					Arbitrary::arbitrary(g),
+					Type::arbitrary(g).try_into().unwrap(),
 					Arbitrary::arbitrary(g),
 				)
 			},
-			11 => Store(Arbitrary::arbitrary(g)),
-			12 => NoOp,
-			13 => Request(Arbitrary::arbitrary(g)),
-			14 => Constant(Arbitrary::arbitrary(g)),
-			15 => StackAddr(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			16 =>
+			11 => Store,
+			12 => StoreStack(Arbitrary::arbitrary(g)),
+			13 => NoOp,
+			14 => Request(Arbitrary::arbitrary(g)),
+			15 => Constant(Arbitrary::arbitrary(g)),
+			16 => StackAddr(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			17 =>
 			{
 				StackRes(
 					Arbitrary::arbitrary(g),
@@ -65,7 +89,7 @@ impl Arbitrary for Instruction
 					Arbitrary::arbitrary(g),
 				)
 			},
-			17 => Invalid(0),
+			18 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}
@@ -109,7 +133,7 @@ impl Arbitrary for WithOutput
 	fn arbitrary(g: &mut Gen) -> Self
 	{
 		use Instruction::*;
-		Self(match gen_range(g, 0, 8)
+		Self(match gen_range(g, 0, 9)
 		{
 			0 =>
 			{
@@ -140,6 +164,14 @@ impl Arbitrary for WithOutput
 			5 => Capture(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			6 => Pick(Arbitrary::arbitrary(g)),
 			7 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			8 =>
+			{
+				Load(
+					Arbitrary::arbitrary(g),
+					Type::arbitrary(g).try_into().unwrap(),
+					Arbitrary::arbitrary(g),
+				)
+			},
 			_ => unreachable!(),
 		})
 	}

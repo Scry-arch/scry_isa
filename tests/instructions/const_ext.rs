@@ -40,5 +40,5 @@ test_assembly_error! {
 		err_type: UnexpectedChars(",") };
 	"const u1000 , unknown_label" => ParseError {
 		start_token: 1, start_idx: 1, end_token: 1, end_idx: 5,
-		err_type: OutOfBoundValue(1000, 0, 7) };
+		err_type: OutOfBoundValue(1000, 0, 3) };
 }
