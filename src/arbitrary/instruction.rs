@@ -64,10 +64,9 @@ impl Arbitrary for Instruction
 					Arbitrary::arbitrary(g),
 				)
 			},
-			7 => Capture(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			8 => Pick(Arbitrary::arbitrary(g)),
-			9 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			10 =>
+			7 => Pick(Arbitrary::arbitrary(g)),
+			8 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			9 =>
 			{
 				Load(
 					Arbitrary::arbitrary(g),
@@ -75,13 +74,13 @@ impl Arbitrary for Instruction
 					Arbitrary::arbitrary(g),
 				)
 			},
-			11 => Store,
-			12 => StoreStack(Arbitrary::arbitrary(g)),
-			13 => NoOp,
-			14 => Request(Arbitrary::arbitrary(g)),
-			15 => Constant(Arbitrary::arbitrary(g)),
-			16 => StackAddr(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			17 =>
+			10 => Store,
+			11 => StoreStack(Arbitrary::arbitrary(g)),
+			12 => NoOp,
+			13 => Request(Arbitrary::arbitrary(g)),
+			14 => Constant(Arbitrary::arbitrary(g)),
+			15 => StackAddr(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			16 =>
 			{
 				StackRes(
 					Arbitrary::arbitrary(g),
@@ -89,7 +88,7 @@ impl Arbitrary for Instruction
 					Arbitrary::arbitrary(g),
 				)
 			},
-			18 => Invalid(0),
+			17 => Invalid(0),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}
@@ -161,10 +160,9 @@ impl Arbitrary for WithOutput
 					Arbitrary::arbitrary(g),
 				)
 			},
-			5 => Capture(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			6 => Pick(Arbitrary::arbitrary(g)),
-			7 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
-			8 =>
+			5 => Pick(Arbitrary::arbitrary(g)),
+			6 => PickI(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+			7 =>
 			{
 				Load(
 					Arbitrary::arbitrary(g),

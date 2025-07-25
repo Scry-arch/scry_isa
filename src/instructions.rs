@@ -140,13 +140,6 @@ pub enum Instruction
 	/// 0. The branch location offset.
 	Jump(Bits<7, true>, Bits<6, false>),
 
-	/// The capture instruction.
-	///
-	/// Fields:
-	/// 0. Target whose outputs to capture
-	/// 0. Target to get the captured inputs
-	Capture(Bits<5, false>, Bits<5, false>),
-
 	/// The duplicate instruction.
 	///
 	/// Fields:
@@ -249,13 +242,4 @@ pub enum Instruction
 	/// 0. The raw bits of the constant. If signed, should be handled
 	/// accordingly.
 	Constant(BitsDyn<8>),
-}
-
-impl Instruction
-{
-	/// Returns the canonical `nop` instruction.
-	pub fn nop() -> Self
-	{
-		Self::Capture(0.try_into().unwrap(), 0.try_into().unwrap())
-	}
 }

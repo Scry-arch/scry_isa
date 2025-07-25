@@ -185,7 +185,6 @@ macro_rules! test_assembly_error {
 mod alu;
 mod alu2;
 mod call;
-mod cap;
 mod const_ext;
 mod dup;
 mod echo;

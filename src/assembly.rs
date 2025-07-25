@@ -1976,13 +1976,6 @@ map_mnemonics! {
 	{
 		loc = Offset<6,false>
 	}
-	"cap" (Capture(tar1,tar2)) [ 0 1 0 0 0 1 [tar1:5] [tar2:5]]
-	{
-		(tar1,tar2) <= CommaBetween<
-			ReferenceParser<5>,
-			ReferenceParser<5>,
-		> => (*tar1,*tar2)
-	}
 	"dup" (Duplicate(next, tar1,tar2)) [ 1 0 1 1 1 [next:1] [tar1:5] [tar2:5]]
 	{
 		(tar1,(tar2,next)) <= CommaBetween<

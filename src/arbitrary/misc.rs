@@ -66,9 +66,9 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Jump(..) => [1, 2].iter(),
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
-		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Capture(..) | Pick(..)
-		| PickI(..) | Load(..) | Store | StoreStack(..) | NoOp | Request(..) | Invalid(..)
-		| Constant(..) | StackAddr(..) | StackRes(..) => [].iter(),
+		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Pick(..) | PickI(..)
+		| Load(..) | Store | StoreStack(..) | NoOp | Request(..) | Invalid(..) | Constant(..)
+		| StackAddr(..) | StackRes(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -104,7 +104,7 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 	use Instruction::*;
 	match instr
 	{
-		Echo(_, first, second) | Duplicate(_, first, second) | Capture(first, second) =>
+		Echo(_, first, second) | Duplicate(_, first, second) =>
 		{
 			vec![(1, first.value()), (2, second.value())]
 		},
@@ -149,8 +149,6 @@ pub fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 		EchoLong(b) if idx == 1 => ref_type([b.value]),
 		Duplicate(_, first, _) if idx == 1 => ref_type([first.value]),
 		Duplicate(_, _, second) if idx == 2 => ref_type([second.value]),
-		Capture(first, _) if idx == 1 => ref_type([first.value]),
-		Capture(_, second) if idx == 2 => ref_type([second.value]),
 		Alu(_, b) if idx == 1 => ref_type([b.value]),
 		Alu2(_, _, b) if idx == 2 => ref_type([b.value]),
 		Pick(first) if idx == 1 => ref_type([first.value]),
