@@ -1,4 +1,4 @@
-use crate::{Alu2OutputVariant, BitValue, Bits, BitsDyn, Exclude, Type};
+use crate::{Alu2OutputVariant, BitValue, Bits, Exclude, Type};
 use duplicate::{duplicate, duplicate_item};
 use petgraph::{
 	algo::dijkstra::dijkstra,
@@ -2003,10 +2003,10 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 	}
 }
 
-pub struct TypeMatcher<'a>(PhantomData<&'a ()>);
-impl<'a> Parser<'a> for TypeMatcher<'a>
+pub struct TypeMatcher<'a, const SIZE1: u32, const SIZE2: u32>(PhantomData<&'a ()>);
+impl<'a, const SIZE1: u32, const SIZE2: u32> Parser<'a> for TypeMatcher<'a, SIZE1, SIZE2>
 {
-	type Internal = Bits<4, false>;
+	type Internal = Bits<SIZE1, false>;
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
@@ -2017,6 +2017,7 @@ impl<'a> Parser<'a> for TypeMatcher<'a>
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
+		assert_eq!(SIZE1, SIZE2 + 1);
 		tokens
 			.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
@@ -2039,7 +2040,7 @@ impl<'a> Parser<'a> for TypeMatcher<'a>
 					))
 				}
 				.and_then(|signed| {
-					Bits::<2, false>::parse(Some(&token[1..]).into_iter(), f)
+					Bits::<SIZE2, false>::parse(Some(&token[1..]).into_iter(), f)
 						.map_err(|mut err| {
 							err.start_idx += 1;
 							err.end_idx += 1;
@@ -2058,14 +2059,7 @@ impl<'a> Parser<'a> for TypeMatcher<'a>
 					}
 					.try_into()
 					.map(|t| (t, consumed))
-					.map_err(|_| {
-						ParseError::from_token(
-							token,
-							0,
-							1,
-							ParseErrorType::OutOfBoundValue(size.value as isize, 0, 3),
-						)
-					})
+					.map_err(|_| unreachable!())
 				})
 			})
 	}
@@ -2083,10 +2077,12 @@ impl<'a> Parser<'a> for TypeMatcher<'a>
 	}
 }
 
-pub struct TypedConst<'a, const SIZE: u32>(PhantomData<&'a ()>);
-impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
+pub struct Signless<'a, const SIZE: u32>(PhantomData<&'a ()>);
+impl<'a, const SIZE: u32> Parser<'a> for Signless<'a, SIZE>
 {
-	type Internal = BitsDyn<SIZE>;
+	/// The bool is only used to hint for the print whether to show signed of or
+	/// unsigned immedaite. Its value is irrelevant when parsing.
+	type Internal = (Bits<SIZE, false>, bool);
 
 	const ALONE_LEFT: bool = true;
 	const ALONE_RIGHT: bool = true;
@@ -2097,104 +2093,98 @@ impl<'a, const SIZE: u32> Parser<'a> for TypedConst<'a, SIZE>
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		Then::<TypeMatcher, Comma>::parse::<_, F, _>(tokens.clone(), f.borrow()).and_then(
-			|((ty, _), consumed)| {
-				let ty: Type = ty.try_into().unwrap();
-				if SIZE >= ty.size() as u32
-				{
-					let (consumed, tokens) = consumed.advance_iter(tokens.clone());
-					Then::<Symbol, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
-						tokens.clone(),
-						f.borrow(),
-					)
-					.and_then(|((sym1, sym2), consumed2)| {
-						f.borrow()(
-							if let Some((_, sym2)) = sym2
-							{
-								Resolve::Distance(sym1, sym2)
-							}
-							else
-							{
-								Resolve::Address(sym1)
+		match Then::<Symbol, Maybe<Then<Arrow, Symbol>>>::parse::<_, F, _>(
+			tokens.clone(),
+			f.borrow(),
+		)
+		{
+			Ok(((sym1, sym2), consumed2)) =>
+			{
+				f.borrow()(
+					if let Some((_, sym2)) = sym2
+					{
+						Resolve::Distance(sym1, sym2)
+					}
+					else
+					{
+						Resolve::Address(sym1)
+					},
+				)
+				.map(|addr| (addr, consumed2.clone()))
+				.map_err(|_| ParseError::from_consumed(consumed2, ParseErrorType::UnknownSymbol))
+				.and_then(|(val, consumed)| {
+					if let Ok(b) = TryInto::<Bits<SIZE, false>>::try_into(val)
+					{
+						Ok(((b, true), consumed))
+					}
+					else if let Ok(b) = TryInto::<Bits<SIZE, true>>::try_into(val)
+					{
+						Ok((
+							(
+								Bits {
+									value: b.value & ((1 << SIZE) - 1),
+								},
+								true,
+							),
+							consumed,
+						))
+					}
+					else
+					{
+						Err(ParseError::from_consumed(
+							consumed,
+							ParseErrorType::OutOfBoundValue(
+								val as isize,
+								Bits::<SIZE, true>::get_min().value as isize,
+								Bits::<SIZE, false>::get_max().value as isize,
+							),
+						))
+					}
+				})
+			},
+			Err(_) =>
+			{
+				Bits::<SIZE, false>::parse::<_, F, _>(tokens.clone(), f.borrow())
+					.or_else(|_| {
+						Bits::<SIZE, true>::parse::<_, F, _>(tokens.clone(), f.borrow()).map(
+							|(b, consumed)| {
+								(
+									Bits {
+										value: b.value & ((1 << SIZE) - 1),
+									},
+									consumed,
+								)
 							},
 						)
-						.map(|addr| (addr, consumed2.clone()))
-						.map_err(|_| {
-							ParseError::from_consumed(consumed2, ParseErrorType::UnknownSymbol)
-						})
 					})
-					.map(|(val, consumed2)| {
-						(
-							BitsDyn::<SIZE>::try_from((ty.is_signed_int(), val))
-								.unwrap()
-								.into(),
-							consumed2,
-						)
-					})
-					.or_else(|err1| {
-						// Value is wrong, create sensible error by trying to parse
-						// again, guaranteeing an error
-						if ty.is_signed_int()
+					.map_err(|mut e| {
+						if let ParseErrorType::OutOfBoundValue(v, _, _) = e.err_type
 						{
-							Bits::<SIZE, true>::parse(tokens, f)
-								.map(|(b, consumed2)| (b.into(), consumed2))
+							e.err_type = ParseErrorType::OutOfBoundValue(
+								v,
+								Bits::<SIZE, true>::get_min().value as isize,
+								Bits::<SIZE, false>::get_max().value as isize,
+							);
 						}
-						else
-						{
-							Bits::<SIZE, false>::parse(tokens, f)
-								.map(|(b, consumed2)| (b.into(), consumed2))
-						}
-						.or_else(|err2| {
-							Err(match (&err1.err_type, &err2.err_type)
-							{
-								(
-									ParseErrorType::UnknownSymbol,
-									ParseErrorType::UnexpectedChars(_),
-								) => err1,
-								_ => err2,
-							})
-						})
+						e
 					})
-					.map(|(b, consumed2)| (b, consumed.then(&consumed2)))
-					.map_err(|mut err| {
-						consumed.advance_err(&mut err);
-						err
-					})
-				}
-				else
-				{
-					Err(ParseError {
-						start_token: 0,
-						start_idx: 1,
-						end_token: 0,
-						end_idx: consumed.chars,
-						// TODO: should handle higher powers of 2
-						err_type: ParseErrorType::OutOfBoundValue(ty.size_pow2() as isize, 0, 0),
-					})
-				}
+					.map(|(b, c)| ((b, true), c))
 			},
-		)
+		}
 	}
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		assert!(SIZE >= 8); // TODO: support higher bit lengths
-		if let Ok(bits) = internal.clone().try_into()
+		if internal.1
 		{
-			CommaBetween::<TypeMatcher, Bits<SIZE, true>>::print(
-				&(Type::Int(0).try_into().unwrap(), bits),
-				out,
-			)
+			// Need to sign-extend the value
+			let shift = 32 - SIZE;
+			let extended = (internal.0.value << shift) >> shift;
+			Bits::<SIZE, true>::print(&Bits { value: extended }, out)
 		}
 		else
 		{
-			CommaBetween::<TypeMatcher, Bits<SIZE, false>>::print(
-				&(
-					Type::Uint(0).try_into().unwrap(),
-					internal.clone().try_into().unwrap(),
-				),
-				out,
-			)
+			Bits::<SIZE, false>::print(&internal.0, out)
 		}
 	}
 }

@@ -78,7 +78,7 @@ impl Arbitrary for Instruction
 			11 => StoreStack(Arbitrary::arbitrary(g)),
 			12 => NoOp,
 			13 => Request(Arbitrary::arbitrary(g)),
-			14 => Constant(Arbitrary::arbitrary(g)),
+			14 => Constant(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			15 => StackAddr(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
 			16 =>
 			{

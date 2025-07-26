@@ -1,4 +1,4 @@
-use crate::{Bits, BitsDyn};
+use crate::Bits;
 use duplicate::duplicate;
 use std::convert::TryInto;
 use variant_count::VariantCount;
@@ -42,6 +42,10 @@ pub enum InstructionFormat
 	Doub(Bits<5, false>, Bits<5, false>),
 }
 
+/// Lists basic types.
+///
+/// Converting to/from Bits<SIZE, false> using TryFrom/TryInto is the only
+/// correct way to encode/decode types.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Type
 {
@@ -95,7 +99,7 @@ impl Type
 		}
 	}
 }
-impl TryFrom<Type> for Bits<4, false>
+impl<const SIZE: u32> TryFrom<Type> for Bits<SIZE, false>
 {
 	type Error = ();
 
@@ -103,24 +107,29 @@ impl TryFrom<Type> for Bits<4, false>
 	{
 		match ty
 		{
-			Type::Uint(x) if x < 4 => Ok((x as i32).try_into().unwrap()),
-			Type::Int(x) if x < 4 => Ok(((4 + x) as i32).try_into().unwrap()),
-			_ => Err(()),
+			Type::Uint(x) => ((x * 2) as i32).try_into(),
+			Type::Int(x) => (((x * 2) + 1) as i32).try_into(),
 		}
 	}
 }
-impl TryFrom<Bits<4, false>> for Type
+impl<const SIZE: u32> TryFrom<Bits<SIZE, false>> for Type
 {
 	type Error = ();
 
-	fn try_from(bits: Bits<4, false>) -> Result<Self, Self::Error>
+	fn try_from(bits: Bits<SIZE, false>) -> Result<Self, Self::Error>
 	{
-		match bits.value
-		{
-			0..4 => Ok(Type::Uint(bits.value as u8)),
-			4..8 => Ok(Type::Int(bits.value as u8 - 4)),
-			_ => Err(()),
-		}
+		assert!(SIZE <= 8);
+		let encoding = (bits.value / 2) as u8;
+		Ok(
+			if bits.value % 2 == 0
+			{
+				Type::Uint(encoding)
+			}
+			else
+			{
+				Type::Int(encoding)
+			},
+		)
 	}
 }
 
@@ -241,5 +250,5 @@ pub enum Instruction
 	/// 0. Whether the created constant is signed or not
 	/// 0. The raw bits of the constant. If signed, should be handled
 	/// accordingly.
-	Constant(BitsDyn<8>),
+	Constant(Bits<3, false>, Bits<8, false>),
 }

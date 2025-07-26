@@ -6,6 +6,15 @@ test_assembly! {
 	"const i0, -1"
 	"const u0, 255"
 	"const i0, -127"
+	"const u1, 2"
+	"const i1, 3"
+	"const u2, 4"
+	"const i2, 5"
+	"const u3, 4"
+	"const i3, 5"
+	"const i1, 128" => "const i1, -128"
+	"const i2, 196" => "const i2, -60"
+	"const i3, 255" => "const i3, -1"
 
 	(10 start:120)
 	"const u0, start" => "const u0, 120"
@@ -38,7 +47,10 @@ test_assembly_error! {
 	"const u0 som_leb" => ParseError {
 		start_token: 2, start_idx: 0, end_token: 2, end_idx: 7,
 		err_type: UnexpectedChars(",") };
-	"const u1000 , unknown_label" => ParseError {
+	"const u4, unknown_label" => ParseError {
+		start_token: 1, start_idx: 1, end_token: 1, end_idx: 2,
+		err_type: OutOfBoundValue(4, 0, 3) };
+	"const u1000, unknown_label" => ParseError {
 		start_token: 1, start_idx: 1, end_token: 1, end_idx: 5,
 		err_type: OutOfBoundValue(1000, 0, 3) };
 }

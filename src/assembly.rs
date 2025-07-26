@@ -2060,14 +2060,14 @@ map_mnemonics! {
 	(Load(false, type_f, offset)) [ 0 0 1 0 0 0 0 [type_f:4] [offset:5] ]
 	{
 		(type_f, offset )<= CommaBetween<
-			TypeMatcher,
+			TypeMatcher<4,3>,
 			ReferenceParser<5>
 		> => (*type_f, *offset)
 	}
 	(Load(true, type_f, index)) [ 0 0 1 0 0 1 0 [type_f:4] [index:5] ]
 	{
 		(type_f, index )<= Then<
-			TypeMatcher,
+			TypeMatcher<4,3>,
 			MemIndex
 		> => (*type_f, *index)
 	}
@@ -2091,9 +2091,12 @@ map_mnemonics! {
 		v <= Implicit<Bits<8, false>,255> => (*v)
 	}
 	"const"
-	(Constant(imm)) [ 0 0 0 0 0 0 1 [imm:9] ]
+	(Constant(typ, imm)) [ 1 0 1 0 0 [typ:3] [imm:8] ]
 	{
-		imm <= TypedConst<8> => (*imm)
+		(typ, (imm, _)) <= CommaBetween<
+			TypeMatcher<3,2>,
+			Signless<8>,
+		> => (*typ, (*imm, TryInto::<Type>::try_into(*typ).unwrap().is_signed_int()))
 	}
 	"sadr"
 	(StackAddr(size, index)) [ 0 0 1 1 0 0 0 0 0 [size:2] [index:5] ]
