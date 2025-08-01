@@ -207,20 +207,26 @@ pub enum Instruction
 	/// 0. Output target.
 	PickI(Bits<6, false>, Bits<5, false>),
 
-	/// The integer load instruction.
+	/// The load instruction.
 	///
 	/// Fields:
-	/// 0. Whether the load is stack-based or not. True is stack-based.
 	/// 0. The type to be loaded.
-	/// 0. Stack index to load from or output offset.
-	Load(bool, Bits<4, false>, Bits<5, false>),
+	/// 0. Output offset.
+	Load(Bits<4, false>, Bits<5, false>),
+
+	/// The stack load instruction.
+	///
+	/// Fields:
+	/// 0. The type to be loaded.
+	/// 0. The index to load from.
+	LoadStack(Bits<4, false>, Bits<5, false>),
 
 	/// The store instruction.
 	Store,
 
 	/// The stack store instruction.
 	///
-	/// 0. The index to store at
+	/// 0. The index to store at.
 	StoreStack(Bits<5, false>),
 
 	/// The stack address instruction.

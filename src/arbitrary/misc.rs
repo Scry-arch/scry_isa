@@ -67,8 +67,8 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		Call(..) => [1].iter(),
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Pick(..) | PickI(..)
-		| Load(..) | Store | StoreStack(..) | NoOp | Request(..) | Invalid(..) | Constant(..)
-		| StackAddr(..) | StackRes(..) => [].iter(),
+		| Load(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Request(..) | Invalid(..)
+		| Constant(..) | StackAddr(..) | StackRes(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -113,19 +113,10 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		PickI(_, b) => vec![(2, b.value())],
 		Alu(_, b) => vec![(1, b.value())],
 		Alu2(_, _, b) => vec![(2, b.value())],
-		Load(false, _, b) => vec![(2, b.value())],
+		Load(_, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
-		Jump(..)
-		| Call(..)
-		| Load(true, ..)
-		| Store
-		| StoreStack(..)
-		| NoOp
-		| Request(..)
-		| Invalid(..)
-		| Constant(..)
-		| StackAddr(..)
-		| StackRes(..) =>
+		Jump(..) | Call(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Request(..)
+		| Invalid(..) | Constant(..) | StackAddr(..) | StackRes(..) =>
 		{
 			vec![]
 		},
@@ -153,7 +144,7 @@ pub fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 		Alu2(_, _, b) if idx == 2 => ref_type([b.value]),
 		Pick(first) if idx == 1 => ref_type([first.value]),
 		PickI(_, second) if idx == 2 => ref_type([second.value]),
-		Load(false, _, first) if idx == 2 => ref_type([first.value]),
+		Load(_, first) if idx == 2 => ref_type([first.value]),
 		_ =>
 		{
 			panic!(

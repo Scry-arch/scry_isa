@@ -2057,14 +2057,14 @@ map_mnemonics! {
 		> => (*imm, *target)
 	}
 	"ld"
-	(Load(false, type_f, offset)) [ 0 0 1 0 0 0 0 [type_f:4] [offset:5] ]
+	(Load(type_f, offset)) [ 0 0 1 0 0 0 0 [type_f:4] [offset:5] ]
 	{
 		(type_f, offset )<= CommaBetween<
 			TypeMatcher<4,3>,
 			ReferenceParser<5>
 		> => (*type_f, *offset)
 	}
-	(Load(true, type_f, index)) [ 0 0 1 0 0 1 0 [type_f:4] [index:5] ]
+	(LoadStack(type_f, index)) [ 0 0 1 0 0 1 0 [type_f:4] [index:5] ]
 	{
 		(type_f, index )<= Then<
 			TypeMatcher<4,3>,
