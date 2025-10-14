@@ -1,9 +1,100 @@
 Scy ISA
 =============================
 
+[![Rust](https://github.com/scry-arch/scry_isa/actions/workflows/rust.yml/badge.svg)](https://github.com/scry-arch/scry_isa/actions)
+
+Rust crate defining the Scry ISA representation in both Rust types and textual.
+
+This document is meant for contributors to the crate. The documentation is hosted at [docs.rs](https://docs.rs/scry_isa).
+
 # Testing
 
+#### Test Groups
+
+Tests are divided into the following groups:
+
+- `No Features`:
+Tests the minimal API of the crate with no features enabled. 
+
 ```
-cargo test --features=quickcheck_arbitrary
+cargo test --no-default-features
 ```
+
+- `Default Features`: 
+Test that the features that are enabled by default.
+
+```
+cargo test
+```
+
+- `All Feature Combinations`:
+Tests any combination of features. After `--features` add a comma separated list of features to test:
+
+```
+cargo test --no-default-features --features quickcheck_arbitrary
+```
+
+- `documentation`:
+Tests code in the documentation. Even though some of the other test groups might test some of the documentaion code, they are not guaranteed to run all tests. E.g. the test of the cargo readme file (`cargo-readme.md` are only run when this command is used.
+```
+cargo test --doc --all-features
+```
+
+#### Warnings
+
+Compilation warnings are prohibited in this crate and cause CI failure.
+However, this prohibition of off by default in the code to allow for warnings while work is still in progress.
+
+To make compilation fail on warnings, simply add `--features=fail-on-warnings` to your build/test command. E.g.:
+
+```
+cargo test --features=fail-on-warnings
+```
+
+# Formatting
+
+We use `rustfmt` to manage the formatting of this crate's code.
+To have cargo format the code for you, you must have the nightly compiler installed (but not necessarily the default) and then run the command:
+
+```
+cargo +nightly fmt
+```
+
+The CI/CD will check the formatting and fail if it isn't formatted correctly.
+
+# Release Deployment
+
+Deployment of new versions of this crate is managed by CI/CD using git tags. 
+To trigger a new release, simply push a tag to the repository containing only the version number:
+
+```
+git tag 1.0.0
+git push --tags
+```
+
+We do not use the `Cargo.toml` to manage the versioning of this crate.
+The version given in it should not be changed! 
+It must remain as `0.0.0` so CI/CD can correctly modify it for every release.
+
+CI/CD will also reset the change log as part of the release, so do not change the `## [Unreleased]` line nor add an entry for new releases yourself.
+
+CI/CD will also add the new release's changes to `cargo-readme.md` under the `Changelog` section. So do not touch that either.
+
+#### License
+
+<sup>
+Licensed under either of <a href="LICENSE-APACHE">Apache License, Version
+2.0</a> or <a href="LICENSE-MIT">MIT license</a> at your option.
+</sup>
+
+<br>
+
+<sub>
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in this crate by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions.
+</sub>
+
+
 
