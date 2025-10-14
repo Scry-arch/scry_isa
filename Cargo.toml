@@ -1,18 +1,19 @@
 [package]
 name = "scry_isa"
-version = "0.1.0"
+version = "0.0.0"
 authors = ["Emad Jacob Maroun <emoun.open@gmail.com>"]
 edition = "2021"
 
 [dependencies]
 duplicate= { version = "2.0.0", default-features=false}
 lazy_static = "1.4"
-variant_count="=1.1.0"
+variant_count="=1.2.0"
 paste="1.0.5"
 num-traits = { version = "0.2", optional = true }
 quickcheck = { version = "1", optional = true }
 petgraph = "0.6.5"
 dyn-clone = "1.0.17"
+proc-macro2 = "1.0.60" # Does not compile with earlier versions, not directly needed
 
 [dev-dependencies]
 quickcheck_macros = "1"
@@ -20,3 +21,4 @@ quickcheck_macros = "1"
 [features]
 default = ["quickcheck_arbitrary"]
 quickcheck_arbitrary = ["quickcheck", "num-traits"]
+fail-on-warnings = [] # Forces compilation to fail if any warnings are given. Used in CI.

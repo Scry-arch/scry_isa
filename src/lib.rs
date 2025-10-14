@@ -1,5 +1,7 @@
 //! This crate defines the Scry Instruction Set Architecture.
 #![recursion_limit = "2048"]
+#![cfg_attr(feature = "fail-on-warnings", deny(warnings))]
+
 #[cfg(feature = "quickcheck_arbitrary")]
 /// Provides implementations of `quickcheck::Arbitrary` for testing with
 /// `quickcheck`.
