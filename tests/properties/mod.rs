@@ -1,11 +1,34 @@
-use crate::arbitrary::SeparatorType;
 use duplicate::duplicate_item;
-use quickcheck::TestResult;
+use quickcheck::{Arbitrary, Gen, TestResult};
 use scry_isa::{
 	arbitrary::{ArbSymbol, AssemblyInstruction, OperandSubstitutions, SubType},
 	AluVariant, Bits, Instruction, ParseError, ParseErrorType, Parser, ReferenceNode, Resolve,
 };
 use std::{cell::Cell, collections::HashMap, convert::TryInto, marker::PhantomData};
+
+/// Represents the different ways separator character sequences (",", "=>",
+/// etc.) can be in separate tokens
+#[derive(Clone, Copy, Debug)]
+pub enum SeparatorType
+{
+	/// The separator is at the end of a token with other text preceding it.
+	AtEnd,
+	/// The separator is at the start of a token with other text succeeding it.
+	AtStart,
+	/// The separator is in the middle of a token with text both preding and
+	/// succeeding it.
+	InMiddle,
+	/// The separator is alone in the token, with no other text.
+	Alone,
+}
+impl Arbitrary for SeparatorType
+{
+	fn arbitrary(g: &mut Gen) -> Self
+	{
+		use SeparatorType::*;
+		*g.choose(&[AtEnd, AtStart, InMiddle, Alone]).unwrap()
+	}
+}
 
 /// Tests that if we first print an instruction and then parse the printed text
 /// we will get the exact same instruction as we started with.

@@ -16,7 +16,9 @@ dyn-clone = "1.0.17"
 proc-macro2 = "1.0.60" # Does not compile with earlier versions, not directly needed
 
 [dev-dependencies]
-quickcheck_macros = "1"
+quickcheck = "1"
+quickcheck_macros = "1.1"
+
 
 [features]
 default = ["quickcheck_arbitrary"]
