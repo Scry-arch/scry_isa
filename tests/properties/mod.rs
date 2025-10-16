@@ -4,7 +4,7 @@ use scry_isa::{
 	arbitrary::{ArbSymbol, AssemblyInstruction, OperandSubstitutions, SubType},
 	AluVariant, Bits, Instruction, ParseError, ParseErrorType, Parser, ReferenceNode, Resolve,
 };
-use std::{cell::Cell, collections::HashMap, convert::TryInto, marker::PhantomData};
+use std::{cell::Cell, convert::TryInto};
 
 /// Represents the different ways separator character sequences (",", "=>",
 /// etc.) can be in separate tokens
@@ -326,15 +326,6 @@ fn consumes_only_instruction_tokens(assembly: AssemblyInstruction, extra: String
 			return TestResult::discard();
 		}
 	}
-	if let Instruction::Request(imm) = assembly.instruction
-	{
-		if imm.value == 255 && extra_start_with_var
-		{
-			// Extra might result in valid request assembly that doesn't match
-			// the instruction (which has implicit operand) e.g., "req" + "0"
-			return TestResult::discard();
-		}
-	}
 
 	let (_, consumed) = Instruction::parse(chained, resolver).unwrap();
 
@@ -368,21 +359,6 @@ fn consumes_only_instruction_tokens_prop(assembly: AssemblyInstruction, extra: S
 	-> TestResult
 {
 	consumes_only_instruction_tokens(assembly, extra)
-}
-
-#[test]
-fn consumes_only_instruction_tokens_1()
-{
-	let assembly = AssemblyInstruction {
-		instruction: Instruction::Request(255.try_into().unwrap()),
-		substitutions: OperandSubstitutions {
-			subs: HashMap::new(),
-			symbol_addrs: HashMap::new(),
-		},
-		phantom: PhantomData,
-	};
-	let result = consumes_only_instruction_tokens(assembly, "0".to_string());
-	assert!(!result.is_failure(), "{:?}", result);
 }
 
 /// Tests that all possible separator combinations are supported for any

@@ -1,3 +1,3 @@
 test_assembly! {
-	"nop "	// No-op
+	"nop "	: 0b0100000000000000
 }

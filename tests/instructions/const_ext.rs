@@ -1,11 +1,11 @@
 test_assembly! {
-	"const u0, 0"
-	"const i0, 0"
-	"const u0, 1"
-	"const i0, 1"
-	"const i0, -1"
-	"const u0, 255"
-	"const i0, -127"
+	"const u0, 0"		: 0b00000000_000_10000
+	"const i0, 0"		: 0b00000000_001_10000
+	"const u0, 1"		: 0b00000001_000_10000
+	"const i0, 1"		: 0b00000001_001_10000
+	"const i0, -1"		: 0b11111111_001_10000
+	"const u0, 255"		: 0b11111111_000_10000
+	"const i0, -127"	: 0b10000001_001_10000
 	"const u1, 2"
 	"const i1, 3"
 	"const u2, 4"

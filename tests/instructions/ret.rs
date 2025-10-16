@@ -1,7 +1,6 @@
 test_assembly! {
-	"ret 0"
-	"ret 63"
-
+	"ret 0" 					: 0b000000_1110000000
+	"ret 63" 					: 0b111111_1110000000
 	(20 loc:36)
 	"ret loc"  => "ret 7"
 	(0 loc:128)

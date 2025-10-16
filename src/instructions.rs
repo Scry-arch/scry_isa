@@ -6,10 +6,10 @@ use variant_count::VariantCount;
 duplicate! {
 	[
 		name 					variants;
-		[AluVariant]			[Add, Sub, ShiftLeft, ShiftRight, RotateLeft, RotateRight, BitAnd, BitOr, Equal, LessThan, GreaterThan];
-		[Alu2Variant]			[Add, Sub, Multiply];
+		[AluVariant]			[Add, Sub, RotateLeft, RotateRight, BitAnd, BitOr, BitXor, Equal, LessThan, GreaterThan, IsNar, NarTo];
+		[Alu2Variant]			[Add, Sub, Multiply, ShiftLeft, ShiftRight, Division];
 		[Alu2OutputVariant]		[High, Low, FirstLow, FirstHigh, NextHigh, NextLow];
-		[CallVariant]			[Ret, Call]; //[, Portal, Ret, Trap]
+		[CallVariant]			[Ret, Call];
 		[StackControlVariant] 	[Reserve, Free];
 	]
 	#[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -205,7 +205,7 @@ pub enum Instruction
 	/// Fields:
 	/// 0. Immediate value for the pick condition.
 	/// 0. Output target.
-	PickI(Bits<6, false>, Bits<5, false>),
+	PickI(Bits<2, false>, Bits<5, false>),
 
 	/// The load instruction.
 	///
@@ -246,9 +246,6 @@ pub enum Instruction
 
 	/// No-operation instruction.
 	NoOp,
-
-	/// The request instruction.
-	Request(Bits<8, false>),
 
 	/// The constant instruction.
 	///

@@ -2,18 +2,22 @@ use crate::*;
 use lazy_static::lazy_static;
 use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
 
-/// Takes a definition of an instruction encoding and returns the filter adn
-/// mask needed to check if an intruction uses the given encoding.
+/// Takes a definition of an instruction encoding and returns the filter and
+/// mask needed to check if an instruction uses the given encoding.
 ///
-/// The encoded intruction should first be AND'ed with the filter (first result)
-/// to remove any fields from the test. Then the result is compared to the mask
-/// (second result). If they are the same, then it's a match.
+/// The encoding is given from left to right in  bits from highest-order to
+/// lowest-order. I.e. [0 1 1] produces the encoded instruction 0x011. All
+/// encodings must be 16 bits.
+///
+/// The encoded instruction should first be AND'ed with the filter (first
+/// result) to remove any fields from the test. Then the result is compared to
+/// the mask (second result). If they are the same, then it's a match.
 macro_rules! decode_filter_mask {
 
     (
         $($rest:tt)+
     ) => {
-        decode_filter_mask_impl!([$($rest)+] [0] [0] [0])
+        decode_filter_mask_impl!([$($rest)+] [15] [0] [0])
     };
 }
 macro_rules! decode_filter_mask_impl {
@@ -37,7 +41,7 @@ macro_rules! decode_filter_mask_impl {
     ) => {
         decode_filter_mask_impl!(
             [$($rest)*]
-            [($idx + 1)]
+            [($idx - 1)]
             [($pre_filter + (1 << $idx))]
             [$pre_mask]
         )
@@ -53,7 +57,7 @@ macro_rules! decode_filter_mask_impl {
     ) => {
         decode_filter_mask_impl!(
             [$($rest)*]
-            [($idx + 1)]
+            [($idx - 1)]
             [($pre_filter + (1 << $idx))]
             [($pre_mask + (1 << $idx))]
         )
@@ -69,22 +73,22 @@ macro_rules! decode_filter_mask_impl {
     ) => {
         decode_filter_mask_impl!(
             [$($rest)*]
-            [($idx + $field_size)]
+            [($idx - $field_size)]
             [$pre_filter]
             [$pre_mask]
         )
     };
 }
 
-/// Assigns the value of an encoded intruction's fields to variables of the same
-/// name. Assumes that the encoded intruction is of the given encoding.
+/// Assigns the value of an encoded instruction's fields to variables of the
+/// same name. Assumes that the encoded instruction is of the given encoding.
 /// Should use `decode_filter_mask` to check first.
 macro_rules! decode_fields {
 
     (
         $encoded:expr => $($rest:tt)+
     ) => {
-        decode_fields_impl!([$($rest)+] [0] [] [$encoded])
+        decode_fields_impl!([$($rest)+] [15] [] [$encoded])
     };
 }
 macro_rules! decode_fields_impl {
@@ -108,7 +112,7 @@ macro_rules! decode_fields_impl {
     ) => {
         decode_fields_impl!(
             [$($rest)*]
-            [($idx + 1)]
+            [($idx - 1)]
             [$($pre)*]
             [$encoded]
         )
@@ -124,10 +128,10 @@ macro_rules! decode_fields_impl {
     ) => {
         decode_fields_impl!(
             [$($rest)*]
-            [($idx + $field_size)]
+            [($idx - $field_size)]
             [$($pre)*
                 let $field_name = Bits::<$field_size, false>{value:
-                    (($encoded & (((1 << $field_size) - 1) << $idx)) >> $idx) as i32
+                    (($encoded & (((1 << $field_size) - 1) << ($idx-$field_size+1))) >> ($idx-$field_size+1)) as i32
                 }.try_into().unwrap();
 
             ]
@@ -143,7 +147,7 @@ macro_rules! encode_fields {
     (
         $($rest:tt)+
     ) => {
-        encode_fields_impl!([$($rest)+] [0] [ decode_filter_mask!($($rest)+).1 ] )
+        encode_fields_impl!([$($rest)+] [15] [ decode_filter_mask!($($rest)+).1 ] )
     };
 }
 macro_rules! encode_fields_impl {
@@ -165,7 +169,7 @@ macro_rules! encode_fields_impl {
     ) => {
         encode_fields_impl!(
             [$($rest)*]
-            [($idx + 1)]
+            [($idx - 1)]
             [$($pre)*]
         )
     };
@@ -179,8 +183,8 @@ macro_rules! encode_fields_impl {
     ) => {
         encode_fields_impl!(
             [$($rest)*]
-            [($idx + $field_size)]
-            [$($pre)* + ((((Bits::<$field_size,false>::from(*$field_name)).value & ((1 << $field_size)-1))as u16) << $idx)]
+            [($idx - $field_size)]
+            [$($pre)* + ((((Bits::<$field_size,false>::from(*$field_name)).value & ((1 << $field_size)-1))as u16) << ($idx-$field_size+1))]
         )
     };
 }
@@ -716,83 +720,91 @@ macro_rules! map_mnemonics_impl {
 }
 
 map_mnemonics! {
-	"jmp"(Jump(imm, loc)) [ 0 1 1 [imm:7] [loc:6] ]
+	"jmp"(Jump(imm, trig)) [ [trig:6] [imm:7] 1 0 0 ]
 	{
-		(imm, loc) <= Or<
+		(imm, trig) <= Or<
 			JumpOffsets,
 			Offset<13,false>,
 			_
 		>
-		=> (*imm, *loc)
+		=> (*imm, *trig)
 	}
-	"call"(Call(CallVariant::Call, loc)) [ 0 0 0 1 0 0 0 0 0 0 [loc:6]]
+	"call"(Call(CallVariant::Call, trig)) [ [trig:6] 0 1 1 0 0 0 0 0 0 0 ]
 	{
-		loc = Offset<6,false>
+		trig = Offset<6,false>
 	}
-	"ret"(Call(CallVariant::Ret, loc)) [ 0 0 0 1 0 0 0 0 0 1 [loc:6]]
+	"ret"(Call(CallVariant::Ret, trig)) [ [trig:6] 1 1 1 0 0 0 0 0 0 0 ]
 	{
-		loc = Offset<6,false>
+		trig = Offset<6,false>
 	}
-	"dup" (Duplicate(next, tar1,tar2)) [ 1 0 1 1 1 [next:1] [tar1:5] [tar2:5]]
+	"dup" (Duplicate(next, ref1,ref2)) [ [next:1] [ref1:5] [ref2:5] 1 1 0 0 1 ]
 	{
-		(tar1,(tar2,next)) <= CommaBetween<
+		(ref1,(ref2,next)) <= CommaBetween<
 			ReferenceParser<5>,
 			Then<
 				ReferenceParser<5>,
 				BoolFlag<Then<Comma, Alone<Arrow>>>
 			>,
-		> => (*tar1,(*tar2,*next))
+		> => (*ref1,(*ref2,*next))
 	}
-	"echo" (Echo(next,tar1,tar2)) [ 1 0 1 1 0 [next:1] [tar1:5] [tar2:5]]
+	"echo" (Echo(next,ref1,ref2)) [ [next:1] [ref1:5] [ref2:5] 0 1 0 0 1 ]
 	{
-		(tar1,(tar2,next)) <= CommaBetween<
+		(ref1,(ref2,next)) <= CommaBetween<
 			ReferenceParser<5>,
 			Then<
 				ReferenceParser<5>,
 				BoolFlag<Then<Comma, Alone<Arrow>>>
 			>,
-		> => (*tar1,(*tar2,*next))
+		> => (*ref1,(*ref2,*next))
 	}
-	(EchoLong(target)) [ 0 1 0 0 0 0 [target:10] ]
+	(EchoLong(refl)) [ [refl:10] 0 1 0 0 1 0 ]
 	{
-		target = ReferenceParser<10>
+		refl = ReferenceParser<10>
 	}
-	"shl"(Alu(AluVariant::ShiftLeft, target))       [ 1 0 0 0 0 1 0 0 0 0 0         [target:5]]
-	"shr"(Alu(AluVariant::ShiftRight, target))      [ 1 0 0 0 0 0 0 1 0 0 0         [target:5]]
-	"rol"(Alu(AluVariant::RotateLeft, target))      [ 1 0 0 0 0 0 1 1 0 0 0         [target:5]]
-	"ror"(Alu(AluVariant::RotateRight, target))     [ 1 0 0 0 0 0 1 1 1 1 1         [target:5]]
-	"and"(Alu(AluVariant::BitAnd, target))          [ 1 0 0 0 0 1 0 1 0 0 0         [target:5]]
-	"or"(Alu(AluVariant::BitOr, target))            [ 1 0 0 0 0 1 0 1 1 1 1         [target:5]]
-	"eq"(Alu(AluVariant::Equal, target))            [ 1 0 0 0 0 0 0 0 0 0 0         [target:5]]
-	"lt"(Alu(AluVariant::LessThan, target))         [ 1 0 0 0 0 0 1 0 0 0 0         [target:5]]
-	"gt"(Alu(AluVariant::GreaterThan, target))      [ 1 0 0 0 0 0 1 0 1 1 1         [target:5]]
+	//                                                          MOD    FUNC
+	"rol"(Alu(AluVariant::RotateLeft, ref1))      [ 0 [ref1:5] 0 0 0  1 0 1  0 0 0 1 ]
+	"ror"(Alu(AluVariant::RotateRight, ref1))     [ 0 [ref1:5] 1 1 1  1 0 1  0 0 0 1 ]
+	"and"(Alu(AluVariant::BitAnd, ref1))          [ 0 [ref1:5] 0 0 0  0 0 1  0 0 0 1 ]
+	"or"(Alu(AluVariant::BitOr, ref1))            [ 0 [ref1:5] 0 0 0  0 1 1  0 0 0 1 ]
+	"xor"(Alu(AluVariant::BitXor, ref1))          [ 0 [ref1:5] 1 1 1  0 1 1  0 0 0 1 ]
+	"eq"(Alu(AluVariant::Equal, ref1))            [ 0 [ref1:5] 0 0 0  0 0 0  0 0 0 1 ]
+	"lt"(Alu(AluVariant::LessThan, ref1))         [ 0 [ref1:5] 0 0 0  0 1 0  0 0 0 1 ]
+	"gt"(Alu(AluVariant::GreaterThan, ref1))      [ 0 [ref1:5] 1 1 1  0 1 0  0 0 0 1 ]
+	"isnar"(Alu(AluVariant::IsNar, ref1))         [ 0 [ref1:5] 0 0 0  1 0 0  0 0 0 1 ]
+	"narto"(Alu(AluVariant::NarTo, ref1))         [ 0 [ref1:5] 1 1 1  1 0 0  0 0 0 1 ]
 	{
-		target = ReferenceParser<5>
+		ref1 = ReferenceParser<5>
 	}
 	"add"
-	(Alu(AluVariant::Add, target))                  [ 1 0 0 0 0 0 0 0 1 1 1       [target:5]]
-	(Alu2(Alu2Variant::Add, output, target))        [ 1 0 0 0 0 0 0 0 [output:3]    [target:5]]
+	(Alu(AluVariant::Add, ref1))                  [ 0 [ref1:5] 1 1 1  0 0 0  0 0 0 1 ]
+	(Alu2(Alu2Variant::Add, mod_f, ref1))         [ 0 [ref1:5] [mod_f:3]  0 0 0  0 0 0 1 ]
 	"sub"
-	(Alu(AluVariant::Sub, target))                  [ 1 0 0 0 0 0 0 1 1 1 1       [target:5]]
+	(Alu(AluVariant::Sub, ref1))                  [ 0 [ref1:5] 1 1 1  0 0 1  0 0 0 1 ]
 	{
-		target = ReferenceParser<5>
+		ref1 = ReferenceParser<5>
 	}
-	(Alu2(Alu2Variant::Sub, output, target))        [ 1 0 0 0 0 0 0 1 [output:3]    [target:5]]
+	(Alu2(Alu2Variant::Sub, mod_f, ref1))         [ 0 [ref1:5] [mod_f:3]  0 0 1  0 0 0 1 ]
 	{
-		(output, target) <= CommaBetween<
+		(mod_f, ref1) <= CommaBetween<
 			Flatten<Then<
-				Flag<High, Low>,
+				Flag<Low, High>,
 				Maybe<
-					Then<Flag<Arrow, Plus>, Flag<High, Low>>
+					Then<Flag<Arrow, Plus>, Flag<Low, High>>
 				>,
 			>, _>,
 			ReferenceParser<5>
-		> => (*output, *target)
+		> => (*mod_f, *ref1)
 	}
+	"shl"
+	(Alu2(Alu2Variant::ShiftLeft, mod_f, ref1)) [ 0 [ref1:5] [mod_f:3]  0 1 0  0 0 0 1 ]
+	"shr"
+	(Alu2(Alu2Variant::ShiftRight, mod_f, ref1))[ 0 [ref1:5] [mod_f:3]  0 1 1  0 0 0 1 ]
 	"mul"
-	(Alu2(Alu2Variant::Multiply, output, target))  [ 1 0 0 0 0 1 0 0 [output:3]    [target:5]]
+	(Alu2(Alu2Variant::Multiply, mod_f, ref1))  [ 0 [ref1:5] [mod_f:3]  1 0 0  0 0 0 1 ]
+	"div"
+	(Alu2(Alu2Variant::Division, mod_f, ref1))  [ 0 [ref1:5] [mod_f:3]  1 0 1  0 0 0 1 ]
 	{
-		(output, target) <= CommaBetween<
+		(mod_f, ref1) <= CommaBetween<
 			Flatten<Then<
 				Flag<High, Low>,
 				Maybe<
@@ -800,28 +812,28 @@ map_mnemonics! {
 				>,
 			>, _>,
 			ReferenceParser<5>
-		> => (*output, *target)
+		> => (*mod_f, *ref1)
 	}
-	"pick" (Pick(target)) [ 0 1 0 1 0 0 0 0 0 0 0 [target:5] ]
+	"pick" (Pick(ref1)) [ 0 [ref1:5] 0 0 0 0 0 0 0 0 1 0 ]
 	{
-		target = ReferenceParser<5>
+		ref1 = ReferenceParser<5>
 	}
-	(PickI(imm, target)) [ 0 1 0 0 1 [imm:6] [target:5] ]
+	(PickI(imm, ref1)) [ 1 [ref1:5] [imm:2] 0 0 0 0 0 0 1 0 ]
 	{
-		(imm, target) <= CommaBetween<
-			Bits<6, false>,
+		(imm, ref1) <= CommaBetween<
+			Bits<2, false>,
 			ReferenceParser<5>
-		> => (*imm, *target)
+		> => (*imm, *ref1)
 	}
 	"ld"
-	(Load(type_f, offset)) [ 0 0 1 0 0 0 0 [type_f:4] [offset:5] ]
+	(Load(type_f, ref1)) [ 0 [ref1:5] [type_f:4] 1 0 0 0 1 0 ]
 	{
-		(type_f, offset )<= CommaBetween<
+		(type_f, ref1 )<= CommaBetween<
 			TypeMatcher<4,3>,
 			ReferenceParser<5>
-		> => (*type_f, *offset)
+		> => (*type_f, *ref1)
 	}
-	(LoadStack(type_f, index)) [ 0 0 1 0 0 1 0 [type_f:4] [index:5] ]
+	(LoadStack(type_f, index)) [ 0 [index:5] [type_f:4] 1 0 0 0 0 0 ]
 	{
 		(type_f, index )<= Then<
 			TypeMatcher<4,3>,
@@ -829,34 +841,30 @@ map_mnemonics! {
 		> => (*type_f, *index)
 	}
 	"st"
-	(StoreStack(index)) [ 0 0 0 0 0 0 0 0 0 1 1 [index:5] ]
+	(StoreStack(index)) [ 0 [index:5] 0 0 1 0 0 0 0 0 0 0 ]
 	{
 		index <=
 			MemIndex
 		=> (*index)
 	}
-	(Store) [ 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 ]
+	(Store) [ 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]
 	{
 		() = ()
 	}
-	"nop" (NoOp)  [ 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ]
+	"nop" (NoOp)  [ 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]
 	{
 		() = ()
-	}
-	"req" (Request(v)) [ 0 0 0 1 0 0 0 1 [v:8]]
-	{
-		v <= Implicit<Bits<8, false>,255> => (*v)
 	}
 	"const"
-	(Constant(typ, imm)) [ 1 0 1 0 0 [typ:3] [imm:8] ]
+	(Constant(typ, imm)) [[imm:8] [typ:3] 1 0 0 0 0 ]
 	{
 		(typ, (imm, _)) <= CommaBetween<
 			TypeMatcher<3,2>,
 			Signless<8>,
 		> => (*typ, (*imm, TryInto::<Type>::try_into(*typ).unwrap().is_signed_int()))
 	}
-	"sadr"
-	(StackAddr(size, index)) [ 0 0 1 1 0 0 0 0 0 [size:2] [index:5] ]
+	"saddr"
+	(StackAddr(size, index)) [ 0 [index:5] [size:2] 0 1 0 0 0 0 0 0 ]
 	{
 		(size, index )<= Then<
 			Bits<2, false>,
@@ -864,7 +872,7 @@ map_mnemonics! {
 		> => (*size, *index)
 	}
 	"rsrv"
-	(StackRes(true, bytes, base)) [ 0 1 0 1 0 1 0 0 0 0 0 [base:1] [bytes:4] ]
+	(StackRes(true, bytes, base)) [ 1 1 [bytes:4] [base:1] 0 0 0 0 0 0 0 0 0 ]
 	{
 		(bytes, base)<= Then<
 			Pow2<4>,
@@ -872,7 +880,7 @@ map_mnemonics! {
 		> => (*bytes, *base)
 	}
 	"free"
-	(StackRes(false, bytes, base)) [ 0 1 0 1 0 1 0 0 0 0 1 [base:1] [bytes:4] ]
+	(StackRes(false, bytes, base)) [ 1 1 [bytes:4] [base:1] 1 0 0 0 0 0 0 0 0 ]
 	{
 		(bytes, base)<= Then<
 			Pow2<4>,
