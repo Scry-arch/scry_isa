@@ -72,6 +72,25 @@ impl<'a> ParseErrorType<'a>
 			Bits::<SIZE, SIGNED>::get_max().value() as isize,
 		)
 	}
+
+	/// Returns whether the given error type is prioritized.
+	///
+	/// Prioritized error types indicate that some syntax was correctly parsed
+	/// but the logical result of the parsing is invalid. Therefore, no other
+	/// parsing should be attempted, as the parsed syntax is correct and no
+	/// other syntax should be attempted.
+	fn is_prioritized(&self) -> bool
+	{
+		use ParseErrorType::*;
+		match self
+		{
+			UnknownSymbol | OutOfBoundValue(..) | UnequalReference(..) | InvalidReference(..) =>
+			{
+				true
+			},
+			_ => false,
+		}
+	}
 }
 
 /// The span and type of error parsing encountered.
@@ -124,8 +143,19 @@ impl<'a> ParseError<'a>
 		}
 	}
 
+	/// Replaces this error with the given one, if the other error stems from
+	/// more specific parsing and as such is more likely to be the actual issue.
 	pub fn replace_if_further(&mut self, other: &Self)
 	{
+		if !self.err_type.is_prioritized() && other.err_type.is_prioritized()
+		{
+			*self = other.clone();
+		}
+		else if self.err_type.is_prioritized() && !other.err_type.is_prioritized()
+		{
+			return;
+		}
+
 		let other_start_after = self.start_token < other.start_token
 			|| (self.start_token == other.start_token && self.start_idx < other.start_idx);
 		let other_start_equal =
@@ -1779,41 +1809,6 @@ where
 	}
 }
 
-impl TryFrom<(bool, Option<(bool, bool)>)> for Alu2OutputVariant
-{
-	type Error = ();
-
-	fn try_from(value: (bool, Option<(bool, bool)>)) -> Result<Self, Self::Error>
-	{
-		use Alu2OutputVariant::*;
-		Ok(match value
-		{
-			(true, Some((true, false))) => NextLow,
-			(true, Some((false, false))) => FirstHigh,
-			(false, Some((true, true))) => NextHigh,
-			(false, Some((false, true))) => FirstLow,
-			(true, None) => High,
-			(false, None) => Low,
-			_ => return Err(()),
-		})
-	}
-}
-impl From<&Alu2OutputVariant> for (bool, Option<(bool, bool)>)
-{
-	fn from(v: &Alu2OutputVariant) -> Self
-	{
-		use Alu2OutputVariant::*;
-		match v
-		{
-			High => (true, None),
-			Low => (false, None),
-			FirstHigh => (true, Some((false, false))),
-			FirstLow => (false, Some((false, true))),
-			NextHigh => (false, Some((true, true))),
-			NextLow => (true, Some((true, false))),
-		}
-	}
-}
 impl<const SIZE: u32, const SIGNED: bool> TryFrom<(Bits<SIZE, SIGNED>, ())> for Bits<SIZE, SIGNED>
 {
 	type Error = ();
@@ -2314,5 +2309,109 @@ impl<'a, P0: 'a + Parser<'a, Internal = ()>, P: 'a + Parser<'a>> Parser<'a> for 
 	{
 		P0::print(&(), out)?;
 		P::print_with_whitespace(&internal, P::ALONE_RIGHT, out)
+	}
+}
+
+pub struct Alu2Ref<'a>(PhantomData<&'a ()>);
+impl<'a> Parser<'a> for Alu2Ref<'a>
+{
+	type Internal = (Alu2OutputVariant, Bits<5, false>);
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = false;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
+	{
+		let f = f.borrow();
+		Then::<CommaBetween<Low, High>, ReferenceParser<5>>::parse::<_, F, _>(tokens.clone(), f)
+			.map(|((_, ref_f), consumed)| ((Alu2OutputVariant::FirstLow, ref_f), consumed))
+			.or_else(|_| {
+				Then::<CommaBetween<High, Low>, ReferenceParser<5>>::parse::<_, F, _>(
+					tokens.clone(),
+					f,
+				)
+				.map(|((_, ref_f), consumed)| ((Alu2OutputVariant::FirstHigh, ref_f), consumed))
+			})
+			.or_else(|_| {
+				Then::<Low, ReferenceParser<5>>::parse::<_, F, _>(tokens.clone(), f).map(
+					|((_, ref_f), can_consume)| {
+						let (consumed, tokens) = can_consume.clone().advance_iter(tokens.clone());
+
+						Then::<Comma, Then<High, Arrow>>::parse::<_, F, _>(tokens, f).map_or(
+							((Alu2OutputVariant::Low, ref_f), can_consume),
+							|(_, consumed2)| {
+								(
+									(Alu2OutputVariant::NextHigh, ref_f),
+									consumed.then(&consumed2),
+								)
+							},
+						)
+					},
+				)
+			})
+			.or_else(|_| {
+				Then::<High, ReferenceParser<5>>::parse::<_, F, _>(tokens.clone(), f).map(
+					|((_, ref_f), can_consume)| {
+						let (consumed, tokens) = can_consume.clone().advance_iter(tokens.clone());
+
+						Then::<Comma, Then<Low, Arrow>>::parse::<_, F, _>(tokens, f).map_or(
+							((Alu2OutputVariant::High, ref_f), can_consume),
+							|(_, consumed2)| {
+								(
+									(Alu2OutputVariant::NextLow, ref_f),
+									consumed.then(&consumed2),
+								)
+							},
+						)
+					},
+				)
+			})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		match internal.0
+		{
+			Alu2OutputVariant::FirstLow =>
+			{
+				Then::<CommaBetween<Low, High>, ReferenceParser<5>>::print(
+					&(((), ()), internal.1),
+					out,
+				)
+			},
+			Alu2OutputVariant::FirstHigh =>
+			{
+				Then::<CommaBetween<High, Low>, ReferenceParser<5>>::print(
+					&(((), ()), internal.1),
+					out,
+				)
+			},
+			Alu2OutputVariant::NextLow =>
+			{
+				CommaBetween::<Then<High, ReferenceParser<5>>, Then<Low, Arrow>>::print(
+					&(((), internal.1), ((), ())),
+					out,
+				)
+			},
+			Alu2OutputVariant::NextHigh =>
+			{
+				CommaBetween::<Then<Low, ReferenceParser<5>>, Then<High, Arrow>>::print(
+					&(((), internal.1), ((), ())),
+					out,
+				)
+			},
+			Alu2OutputVariant::Low =>
+			{
+				Then::<Low, ReferenceParser<5>>::print(&((), internal.1), out)
+			},
+			Alu2OutputVariant::High =>
+			{
+				Then::<High, ReferenceParser<5>>::print(&((), internal.1), out)
+			},
+		}
 	}
 }

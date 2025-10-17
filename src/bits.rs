@@ -168,12 +168,12 @@ impl From<Bits<3, false>> for Alu2OutputVariant
 		use Alu2OutputVariant::*;
 		match x.value
 		{
-			0b001 => High,
-			0b010 => Low,
-			0b011 => FirstLow,
-			0b100 => FirstHigh,
-			0b101 => NextHigh,
-			0b110 => NextLow,
+			0b001 => FirstLow,
+			0b010 => FirstHigh,
+			0b011 => NextHigh,
+			0b100 => NextLow,
+			0b101 => Low,
+			0b110 => High,
 			_ => panic!("Invalid Alu2OutputVariant"),
 		}
 	}
@@ -185,12 +185,12 @@ impl From<Alu2OutputVariant> for Bits<3, false>
 		use Alu2OutputVariant::*;
 		(match x
 		{
-			High => 0b001,
-			Low => 0b010,
-			FirstLow => 0b011,
-			FirstHigh => 0b100,
-			NextHigh => 0b101,
-			NextLow => 0b110,
+			FirstLow => 0b001,
+			FirstHigh => 0b010,
+			NextHigh => 0b011,
+			NextLow => 0b100,
+			Low => 0b101,
+			High => 0b110,
 		})
 		.try_into()
 		.unwrap()

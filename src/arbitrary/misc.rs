@@ -1,4 +1,6 @@
-use crate::{arbitrary::*, BitValue, Bits, BitsDyn, Instruction, Parser, Resolve};
+use crate::{
+	arbitrary::*, Alu2OutputVariant, BitValue, Bits, BitsDyn, Instruction, Parser, Resolve,
+};
 use duplicate::duplicate_item;
 use quickcheck::{empty_shrinker, Arbitrary, Gen};
 use std::{collections::HashMap, convert::TryInto, marker::PhantomData};
@@ -112,7 +114,14 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		Pick(b) => vec![(1, b.value())],
 		PickI(_, b) => vec![(2, b.value())],
 		Alu(_, b) => vec![(1, b.value())],
-		Alu2(_, _, b) => vec![(2, b.value())],
+		Alu2(_, Alu2OutputVariant::FirstLow, b) | Alu2(_, Alu2OutputVariant::FirstHigh, b) =>
+		{
+			vec![(3, b.value())]
+		},
+		Alu2(_, Alu2OutputVariant::NextLow, b)
+		| Alu2(_, Alu2OutputVariant::NextHigh, b)
+		| Alu2(_, Alu2OutputVariant::Low, b)
+		| Alu2(_, Alu2OutputVariant::High, b) => vec![(2, b.value())],
 		Load(_, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
 		Jump(..) | Call(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Invalid(..)
@@ -141,7 +150,14 @@ pub fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 		Duplicate(_, first, _) if idx == 1 => ref_type([first.value]),
 		Duplicate(_, _, second) if idx == 2 => ref_type([second.value]),
 		Alu(_, b) if idx == 1 => ref_type([b.value]),
-		Alu2(_, _, b) if idx == 2 => ref_type([b.value]),
+		Alu2(_, var, b)
+			if (idx == 3
+				&& (*var == Alu2OutputVariant::FirstLow
+					|| *var == Alu2OutputVariant::FirstHigh))
+				|| idx == 2 =>
+		{
+			ref_type([b.value])
+		},
 		Pick(first) if idx == 1 => ref_type([first.value]),
 		PickI(_, second) if idx == 2 => ref_type([second.value]),
 		Load(_, first) if idx == 2 => ref_type([first.value]),

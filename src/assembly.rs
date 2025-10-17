@@ -785,15 +785,7 @@ map_mnemonics! {
 	}
 	(Alu2(Alu2Variant::Sub, mod_f, ref1))         [ 0 [ref1:5] [mod_f:3]  0 0 1  0 0 0 1 ]
 	{
-		(mod_f, ref1) <= CommaBetween<
-			Flatten<Then<
-				Flag<Low, High>,
-				Maybe<
-					Then<Flag<Arrow, Plus>, Flag<Low, High>>
-				>,
-			>, _>,
-			ReferenceParser<5>
-		> => (*mod_f, *ref1)
+		(mod_f, ref1) <= Alu2Ref => (*mod_f, *ref1)
 	}
 	"shl"
 	(Alu2(Alu2Variant::ShiftLeft, mod_f, ref1)) [ 0 [ref1:5] [mod_f:3]  0 1 0  0 0 0 1 ]
@@ -804,15 +796,7 @@ map_mnemonics! {
 	"div"
 	(Alu2(Alu2Variant::Division, mod_f, ref1))  [ 0 [ref1:5] [mod_f:3]  1 0 1  0 0 0 1 ]
 	{
-		(mod_f, ref1) <= CommaBetween<
-			Flatten<Then<
-				Flag<High, Low>,
-				Maybe<
-					Then<Flag<Arrow, Plus>, Flag<High, Low>>
-				>,
-			>, _>,
-			ReferenceParser<5>
-		> => (*mod_f, *ref1)
+		(mod_f, ref1) <= Alu2Ref => (*mod_f, *ref1)
 	}
 	"pick" (Pick(ref1)) [ 0 [ref1:5] 0 0 0 0 0 0 0 0 1 0 ]
 	{

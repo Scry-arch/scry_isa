@@ -16,54 +16,54 @@ test_assembly! {
 }
 test_assembly_error! {
 	(6 target2:14)
-	"shr =>(target1, target2)" => ParseError {
+	"sub =>(target1, target2)" => ParseError {
 		start_token: 1, start_idx: 3, end_token: 1, end_idx: 10,
 		err_type: UnknownSymbol
 	};
 
 	(6 target1:14)
-	"shr =>(target1, target2)" => ParseError {
+	"eq =>(target1, target2)" => ParseError {
 		start_token: 2, start_idx: 0, end_token: 2, end_idx: 7,
 		err_type: UnknownSymbol
 	};
 
 	(6 target1:12 target2: 14)
-	"shr =>(target1=> branch_to, target2)" => ParseError {
+	"lt =>(target1=> branch_to, target2)" => ParseError {
 		start_token: 2, start_idx: 0, end_token: 2, end_idx: 9,
 		err_type: UnknownSymbol
 	};
 
 	(6 target1:12 target2: 14)
-	"shr =>( target1, target2 => branch_to)" => ParseError {
+	"gt =>( target1, target2 => branch_to)" => ParseError {
 		start_token: 5, start_idx: 0, end_token: 5, end_idx: 9,
 		err_type: UnknownSymbol
 	};
 
 	(6 target1:12 target2: 14)
-	"shr =>( target1 , target2 ) => branch_to" => ParseError {
+	"isnar =>( target1 , target2 ) => branch_to" => ParseError {
 		start_token: 7, start_idx: 0, end_token: 7, end_idx: 9,
 		err_type: UnknownSymbol
 	};
 
-	"shr =>(3 | target2)" => ParseError {
+	"narto =>(3 | target2)" => ParseError {
 		start_token: 2, start_idx: 0, end_token: 2, end_idx: 1,
 		err_type: UnexpectedChars(",")
 	};
 
 	(6 target1:12 target2: 14 )
-	"shr =>(target1 , target2," => ParseError {
+	"and =>(target1 , target2," => ParseError {
 		start_token: 3, start_idx: 7, end_token: 3, end_idx: 8,
 		err_type: UnexpectedChars(")")
 	};
 
 	(6 target1:12 target2: 14 )
-	"shr =>(target1 , target2" => ParseError {
+	"or =>(target1 , target2" => ParseError {
 		start_token: 4, start_idx: 0, end_token: 4, end_idx: 0,
 		err_type: EndOfStream
 	};
 
 	(6 target1:12 target2: 14 )
-	"shr =>(target1, target2)" => ParseError {
+	"xor =>(target1, target2)" => ParseError {
 		start_token: 1, start_idx: 0, end_token: 2, end_idx: 8,
 		err_type: UnequalReference(
 			2, 3,
@@ -73,7 +73,7 @@ test_assembly_error! {
 	};
 
 	(100 branch_from:120 branch_to:200 target1:220 target2: 120 )
-	"shr =>(branch_from=>branch_to=>target1, target2)" => ParseError {
+	"echo =>(branch_from=>branch_to=>target1, target2)" => ParseError {
 		start_token: 1, start_idx: 0, end_token: 2, end_idx: 8,
 		err_type: UnequalReference(
 			19, 9,
@@ -87,7 +87,7 @@ test_assembly_error! {
 	};
 
 	(100 branch_from:120 branch_to:200 target1:220 target2: 120 target3: 130 )
-	"shr =>(branch_from=>branch_to=>target1=>target2, target2)=>target3" => ParseError {
+	"sub =>(branch_from=>branch_to=>target1=>target2, target2)=>target3" => ParseError {
 		start_token: 1, start_idx: 0, end_token: 2, end_idx: 17,
 		err_type: UnequalReference(
 			24, 9,
@@ -106,7 +106,7 @@ test_assembly_error! {
 	};
 
 	(100 branch_from:120 branch_to:200 target1:180 target2: 120)
-	"shr =>(branch_from=>branch_to=> target1, target2)" => ParseError {
+	"add =>(branch_from=>branch_to=> target1, target2)" => ParseError {
 		start_token: 1, start_idx: 0, end_token: 3, end_idx: 8,
 		err_type: InvalidReference(
 			Some(2),
