@@ -16,6 +16,10 @@ test_assembly! {
 	"const i2, 196" => "const i2, -60"
 	"const i3, 255" => "const i3, -1"
 
+	"grow 0"			: 0b00000000_11000000
+	"grow 22"			: 0b00010110_11000000
+	"grow 255"			: 0b11111111_11000000
+
 	(10 start:120)
 	"const u0, start" => "const u0, 120"
 	(10 start:4 end:18)

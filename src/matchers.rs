@@ -2076,7 +2076,7 @@ pub struct Signless<'a, const SIZE: u32>(PhantomData<&'a ()>);
 impl<'a, const SIZE: u32> Parser<'a> for Signless<'a, SIZE>
 {
 	/// The bool is only used to hint for the print whether to show signed of or
-	/// unsigned immedaite. Its value is irrelevant when parsing.
+	/// unsigned immediate. Its value is irrelevant when parsing.
 	type Internal = (Bits<SIZE, false>, bool);
 
 	const ALONE_LEFT: bool = true;

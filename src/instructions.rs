@@ -254,4 +254,20 @@ pub enum Instruction
 	/// 0. The raw bits of the constant. If signed, should be handled
 	/// accordingly.
 	Constant(Bits<3, false>, Bits<8, false>),
+
+	/// The grow instruction.
+	///
+	/// Fields:
+	/// 0. The raw bits of the immediate.
+	Grow(Bits<8, false>),
+
+	/// Trap instruction.
+	Trap,
+
+	/// The cast instruction.
+	///
+	/// Fields:
+	/// 0. The type to cast to.
+	/// 0. Output offset.
+	Cast(Bits<4, false>, Bits<5, false>),
 }

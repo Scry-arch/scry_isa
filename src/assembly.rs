@@ -809,6 +809,14 @@ map_mnemonics! {
 			ReferenceParser<5>
 		> => (*imm, *ref1)
 	}
+	"cast"
+	(Cast(type_f, ref1)) [ 1 [ref1:5] [type_f:4] 1 0 0 0 1 0 ]
+	{
+		(type_f, ref1 )<= CommaBetween<
+			TypeMatcher<4,3>,
+			ReferenceParser<5>
+		> => (*type_f, *ref1)
+	}
 	"ld"
 	(Load(type_f, ref1)) [ 0 [ref1:5] [type_f:4] 1 0 0 0 1 0 ]
 	{
@@ -836,6 +844,7 @@ map_mnemonics! {
 		() = ()
 	}
 	"nop" (NoOp)  [ 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]
+	"trap" (Trap)  [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]
 	{
 		() = ()
 	}
@@ -846,6 +855,11 @@ map_mnemonics! {
 			TypeMatcher<3,2>,
 			Signless<8>,
 		> => (*typ, (*imm, TryInto::<Type>::try_into(*typ).unwrap().is_signed_int()))
+	}
+	"grow"
+	(Grow(imm)) [[imm:8] 1 1 0 0 0 0 0 0 ]
+	{
+		imm <= Bits<8, false> => (*imm)
 	}
 	"saddr"
 	(StackAddr(size, index)) [ 0 [index:5] [size:2] 0 1 0 0 0 0 0 0 ]

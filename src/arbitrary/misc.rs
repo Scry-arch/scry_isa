@@ -70,7 +70,7 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 		// We don't use the wildcard match to not forget to add instructions above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Pick(..) | PickI(..)
 		| Load(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Invalid(..) | Constant(..)
-		| StackAddr(..) | StackRes(..) => [].iter(),
+		| StackAddr(..) | StackRes(..) | Trap | Grow(..) | Cast(..) => [].iter(),
 	}
 	.cloned()
 }
@@ -122,10 +122,10 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		| Alu2(_, Alu2OutputVariant::NextHigh, b)
 		| Alu2(_, Alu2OutputVariant::Low, b)
 		| Alu2(_, Alu2OutputVariant::High, b) => vec![(2, b.value())],
-		Load(_, b) => vec![(2, b.value())],
+		Load(_, b) | Cast(_, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
 		Jump(..) | Call(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Invalid(..)
-		| Constant(..) | StackAddr(..) | StackRes(..) =>
+		| Constant(..) | StackAddr(..) | StackRes(..) | Trap | Grow(..) =>
 		{
 			vec![]
 		},
@@ -160,7 +160,7 @@ pub fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 		},
 		Pick(first) if idx == 1 => ref_type([first.value]),
 		PickI(_, second) if idx == 2 => ref_type([second.value]),
-		Load(_, first) if idx == 2 => ref_type([first.value]),
+		Load(_, first) | Cast(_, first) if idx == 2 => ref_type([first.value]),
 		_ =>
 		{
 			panic!(

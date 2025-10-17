@@ -93,7 +93,16 @@ impl Arbitrary for Instruction
 					Arbitrary::arbitrary(g),
 				)
 			},
-			17 => Invalid(0),
+			17 => Trap,
+			18 => Grow(Arbitrary::arbitrary(g)),
+			19 =>
+			{
+				Cast(
+					Type::arbitrary(g).try_into().unwrap(),
+					Arbitrary::arbitrary(g),
+				)
+			},
+			20 => Invalid(0b1111111111111111),
 			x => panic!("Missing arbitrary implement for instruction: {}", x),
 		}
 	}
