@@ -1607,12 +1607,10 @@ impl<'a, T: Keyword> Parser<'a> for T
 
 duplicate! {
 	[
-		name	text;
-		[High]	["High"];
-		[Low]	["Low"];
-		[Int]	["Int"];
-		[Uint]	["Uint"];
-		[Base]	["Base"];
+		name		text;
+		[High]		["High"];
+		[Low]		["Low"];
+		[Private]	["Private"];
 	]
 	pub struct name();
 	impl Keyword for name
@@ -1932,8 +1930,8 @@ impl<'a> Parser<'a> for JumpOffsets<'a>
 	}
 }
 
-pub struct Pow2<'a, const SIZE: u32>(PhantomData<&'a ()>);
-impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
+pub struct Pow2<'a, const SIZE: u32, const START: u32 = 1>(PhantomData<&'a ()>);
+impl<'a, const SIZE: u32, const START: u32> Parser<'a> for Pow2<'a, SIZE, START>
 {
 	type Internal = Bits<SIZE, false>;
 
@@ -1946,6 +1944,9 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
+		const {
+			assert!(START.is_power_of_two(), "START must be a power of 2");
+		}
 		tokens
 			.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
@@ -1965,23 +1966,30 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 				value_str
 					.parse::<u16>()
 					.map_or(value_error.clone(), |value| {
-						if value.count_ones() == 1
+						if value.is_power_of_two()
 						{
-							let mut pow = 0;
-							let mut v = value >> 1;
-							while v != 0
+							let pow = value.trailing_zeros();
+							let err = ParseError::from_token(
+								value_str,
+								0,
+								0,
+								ParseErrorType::OutOfBoundValue(
+									2u16.pow(pow) as isize,
+									START as isize,
+									2u16.pow(START.trailing_zeros() + 2u32.pow(SIZE) - 1) as isize,
+								),
+							);
+							if value >= START as u16
 							{
-								v >>= 1;
-								pow += 1;
+								((pow - START.trailing_zeros()) as i32)
+									.try_into()
+									.or(Err(err))
+									.map(|b| (b, CanConsume::chars(value_str.len())))
 							}
-							pow.try_into()
-								.or(Err(ParseError::from_token(
-									value_str,
-									0,
-									0,
-									ParseErrorType::from_bits::<SIZE, false>(pow as isize),
-								)))
-								.map(|b| (b, CanConsume::chars(value_str.len())))
+							else
+							{
+								Err(err)
+							}
 						}
 						else
 						{
@@ -1993,7 +2001,7 @@ impl<'a, const SIZE: u32> Parser<'a> for Pow2<'a, SIZE>
 
 	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
 	{
-		let value = 1 << internal.value;
+		let value = 1 << (internal.value + START.trailing_zeros() as i32);
 		out.write_fmt(format_args!("{}", value))
 	}
 }
@@ -2012,7 +2020,9 @@ impl<'a, const SIZE1: u32, const SIZE2: u32> Parser<'a> for TypeMatcher<'a, SIZE
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		assert_eq!(SIZE1, SIZE2 + 1);
+		const {
+			assert!(SIZE1 == SIZE2 + 1);
+		}
 		tokens
 			.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
@@ -2035,7 +2045,7 @@ impl<'a, const SIZE1: u32, const SIZE2: u32> Parser<'a> for TypeMatcher<'a, SIZE
 					))
 				}
 				.and_then(|signed| {
-					Bits::<SIZE2, false>::parse(Some(&token[1..]).into_iter(), f)
+					Pow2::<SIZE2, 8>::parse(Some(&token[1..]).into_iter(), f)
 						.map_err(|mut err| {
 							err.start_idx += 1;
 							err.end_idx += 1;
@@ -2068,7 +2078,42 @@ impl<'a, const SIZE1: u32, const SIZE2: u32> Parser<'a> for TypeMatcher<'a, SIZE
 		};
 
 		out.write_char(if signed { 'i' } else { 'u' })?;
-		Bits::<2, false>::print(&(size as i32).try_into().unwrap(), out)
+		Pow2::<SIZE2, 8>::print(&(size as i32).try_into().unwrap(), out)
+	}
+}
+
+pub struct TypeSizeMatcher<'a, const SIZE1: u32, const SIZE2: u32>(PhantomData<&'a ()>);
+impl<'a, const SIZE1: u32, const SIZE2: u32> Parser<'a> for TypeSizeMatcher<'a, SIZE1, SIZE2>
+{
+	type Internal = Bits<SIZE2, false>;
+
+	const ALONE_LEFT: bool = true;
+	const ALONE_RIGHT: bool = true;
+
+	fn parse<I, F, B>(tokens: I, f: B) -> Result<(Self::Internal, CanConsume), ParseError<'a>>
+	where
+		I: Iterator<Item = &'a str> + Clone,
+		B: Borrow<F>,
+		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
+	{
+		TypeMatcher::<SIZE1, SIZE2>::parse(tokens, f).map(|(v, consumed)| {
+			let t: Type = v.try_into().unwrap();
+
+			(
+				Bits::<SIZE2, false> {
+					value: t.size().trailing_zeros() as i32,
+				}
+				.try_into()
+				.unwrap(),
+				consumed,
+			)
+		})
+	}
+
+	fn print(internal: &Self::Internal, out: &mut impl Write) -> std::fmt::Result
+	{
+		out.write_char('u')?;
+		write!(out, "{}", 2u32.pow(internal.value as u32) * 8)
 	}
 }
 
@@ -2244,7 +2289,7 @@ impl<'a> Parser<'a> for VecLength<'a>
 		}
 		else
 		{
-			Pow2::print(internal, out)
+			Pow2::<3>::print(internal, out)
 		}
 	}
 }

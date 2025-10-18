@@ -865,24 +865,18 @@ map_mnemonics! {
 	(StackAddr(size, index)) [ 0 [index:5] [size:2] 0 1 0 0 0 0 0 0 ]
 	{
 		(size, index )<= Then<
-			Bits<2, false>,
+			TypeSizeMatcher<3,2>,
 			MemIndex
 		> => (*size, *index)
 	}
 	"rsrv"
 	(StackRes(true, bytes, base)) [ 1 1 [bytes:4] [base:1] 0 0 0 0 0 0 0 0 0 ]
-	{
-		(bytes, base)<= Then<
-			Pow2<4>,
-			BoolFlag<Prefix<Comma, Base>>,
-		> => (*bytes, *base)
-	}
 	"free"
 	(StackRes(false, bytes, base)) [ 1 1 [bytes:4] [base:1] 1 0 0 0 0 0 0 0 0 ]
 	{
 		(bytes, base)<= Then<
 			Pow2<4>,
-			BoolFlag<Prefix<Comma, Base>>,
+			BoolFlag<Prefix<Comma, Private>>,
 		> => (*bytes, *base)
 	}
 }
