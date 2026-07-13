@@ -46,7 +46,7 @@ pub enum InstructionFormat
 ///
 /// Converting to/from Bits<SIZE, false> using TryFrom/TryInto is the only
 /// correct way to encode/decode types.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Type
 {
 	/// Unsigned integer of the given power of 2. I.e., 0 is 1 byte, 1 is 2
