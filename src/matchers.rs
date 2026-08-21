@@ -2373,13 +2373,13 @@ impl<'a> Parser<'a> for Alu2Ref<'a>
 	{
 		let f = f.borrow();
 		Then::<CommaBetween<Low, High>, ReferenceParser<5>>::parse::<_, F, _>(tokens.clone(), f)
-			.map(|((_, ref_f), consumed)| ((Alu2OutputVariant::FirstLow, ref_f), consumed))
+			.map(|((_, ref_f), consumed)| ((Alu2OutputVariant::LowFirst, ref_f), consumed))
 			.or_else(|_| {
 				Then::<CommaBetween<High, Low>, ReferenceParser<5>>::parse::<_, F, _>(
 					tokens.clone(),
 					f,
 				)
-				.map(|((_, ref_f), consumed)| ((Alu2OutputVariant::FirstHigh, ref_f), consumed))
+				.map(|((_, ref_f), consumed)| ((Alu2OutputVariant::HighFirst, ref_f), consumed))
 			})
 			.or_else(|_| {
 				Then::<Low, ReferenceParser<5>>::parse::<_, F, _>(tokens.clone(), f).map(
@@ -2387,10 +2387,10 @@ impl<'a> Parser<'a> for Alu2Ref<'a>
 						let (consumed, tokens) = can_consume.clone().advance_iter(tokens.clone());
 
 						Then::<Comma, Then<High, Arrow>>::parse::<_, F, _>(tokens, f).map_or(
-							((Alu2OutputVariant::Low, ref_f), can_consume),
+							((Alu2OutputVariant::LowOnly, ref_f), can_consume),
 							|(_, consumed2)| {
 								(
-									(Alu2OutputVariant::NextHigh, ref_f),
+									(Alu2OutputVariant::HighNext, ref_f),
 									consumed.then(&consumed2),
 								)
 							},
@@ -2404,10 +2404,10 @@ impl<'a> Parser<'a> for Alu2Ref<'a>
 						let (consumed, tokens) = can_consume.clone().advance_iter(tokens.clone());
 
 						Then::<Comma, Then<Low, Arrow>>::parse::<_, F, _>(tokens, f).map_or(
-							((Alu2OutputVariant::High, ref_f), can_consume),
+							((Alu2OutputVariant::HighOnly, ref_f), can_consume),
 							|(_, consumed2)| {
 								(
-									(Alu2OutputVariant::NextLow, ref_f),
+									(Alu2OutputVariant::LowNext, ref_f),
 									consumed.then(&consumed2),
 								)
 							},
@@ -2421,39 +2421,39 @@ impl<'a> Parser<'a> for Alu2Ref<'a>
 	{
 		match internal.0
 		{
-			Alu2OutputVariant::FirstLow =>
+			Alu2OutputVariant::LowFirst =>
 			{
 				Then::<CommaBetween<Low, High>, ReferenceParser<5>>::print(
 					&(((), ()), internal.1),
 					out,
 				)
 			},
-			Alu2OutputVariant::FirstHigh =>
+			Alu2OutputVariant::HighFirst =>
 			{
 				Then::<CommaBetween<High, Low>, ReferenceParser<5>>::print(
 					&(((), ()), internal.1),
 					out,
 				)
 			},
-			Alu2OutputVariant::NextLow =>
+			Alu2OutputVariant::LowNext =>
 			{
 				CommaBetween::<Then<High, ReferenceParser<5>>, Then<Low, Arrow>>::print(
 					&(((), internal.1), ((), ())),
 					out,
 				)
 			},
-			Alu2OutputVariant::NextHigh =>
+			Alu2OutputVariant::HighNext =>
 			{
 				CommaBetween::<Then<Low, ReferenceParser<5>>, Then<High, Arrow>>::print(
 					&(((), internal.1), ((), ())),
 					out,
 				)
 			},
-			Alu2OutputVariant::Low =>
+			Alu2OutputVariant::LowOnly =>
 			{
 				Then::<Low, ReferenceParser<5>>::print(&((), internal.1), out)
 			},
-			Alu2OutputVariant::High =>
+			Alu2OutputVariant::HighOnly =>
 			{
 				Then::<High, ReferenceParser<5>>::print(&((), internal.1), out)
 			},

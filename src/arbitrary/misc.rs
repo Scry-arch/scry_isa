@@ -114,14 +114,14 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		Pick(b) => vec![(1, b.value())],
 		PickI(_, b) => vec![(2, b.value())],
 		Alu(_, b) => vec![(1, b.value())],
-		Alu2(_, Alu2OutputVariant::FirstLow, b) | Alu2(_, Alu2OutputVariant::FirstHigh, b) =>
+		Alu2(_, Alu2OutputVariant::LowFirst, b) | Alu2(_, Alu2OutputVariant::HighFirst, b) =>
 		{
 			vec![(3, b.value())]
 		},
-		Alu2(_, Alu2OutputVariant::NextLow, b)
-		| Alu2(_, Alu2OutputVariant::NextHigh, b)
-		| Alu2(_, Alu2OutputVariant::Low, b)
-		| Alu2(_, Alu2OutputVariant::High, b) => vec![(2, b.value())],
+		Alu2(_, Alu2OutputVariant::LowNext, b)
+		| Alu2(_, Alu2OutputVariant::HighNext, b)
+		| Alu2(_, Alu2OutputVariant::LowOnly, b)
+		| Alu2(_, Alu2OutputVariant::HighOnly, b) => vec![(2, b.value())],
 		Load(_, b) | Cast(_, b) => vec![(2, b.value())],
 		// We don't use the wildcard match to not forget to add instructions above
 		Jump(..) | Call(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Invalid(..)
@@ -152,8 +152,8 @@ pub fn name(instr: ref_type([Instruction]), idx: usize) -> ref_type([i32])
 		Alu(_, b) if idx == 1 => ref_type([b.value]),
 		Alu2(_, var, b)
 			if (idx == 3
-				&& (*var == Alu2OutputVariant::FirstLow
-					|| *var == Alu2OutputVariant::FirstHigh))
+				&& (*var == Alu2OutputVariant::LowFirst
+					|| *var == Alu2OutputVariant::HighFirst))
 				|| idx == 2 =>
 		{
 			ref_type([b.value])
