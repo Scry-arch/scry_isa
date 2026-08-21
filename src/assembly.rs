@@ -785,10 +785,8 @@ map_mnemonics! {
 	{
 		(mod_f, ref1) <= Alu2Ref => (*mod_f, *ref1)
 	}
-	"shl"
-	(Alu2(Alu2Variant::ShiftLeft, mod_f, ref1)) [ 0 [ref1:5] [mod_f:3]  0 1 0  0 0 0 1 ]
-	"shr"
-	(Alu2(Alu2Variant::ShiftRight, mod_f, ref1))[ 0 [ref1:5] [mod_f:3]  0 1 1  0 0 0 1 ]
+	"sh"
+	(Alu2(Alu2Variant::Shift, mod_f, ref1)) [ 0 [ref1:5] [mod_f:3]  0 1 0  0 0 0 1 ]
 	"mul"
 	(Alu2(Alu2Variant::Multiply, mod_f, ref1))  [ 0 [ref1:5] [mod_f:3]  1 0 0  0 0 0 1 ]
 	"div"
