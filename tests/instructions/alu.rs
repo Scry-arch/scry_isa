@@ -13,10 +13,6 @@ test_assembly! {
 	"gt =>29"		: 0b0_11101_111_010_0001
 	"lt =>8"		: 0b0_01000_000_010_0001
 	"gt =>9"		: 0b0_01001_111_010_0001
-	"rol =>10"
-	"rol =>11"
-	"ror =>12"
-	"ror =>13"
 	"and =>1"		: 0b0_00001_000_001_0001
 	"or =>2"		: 0b0_00010_000_011_0001
 	"xor =>30"		: 0b0_11110_111_011_0001
@@ -33,11 +29,11 @@ test_assembly! {
 	(30 branch:32 branch_to:40)
 	"sub =>branch=>branch_to" => "sub =>0"
 	(30 branch:34 branch_to:40)
-	"rol =>branch=>branch_to" => "rol =>1"
+	"lt =>branch=>branch_to" => "lt =>1"
 	(124 branch:130 branch_to:642 target:652)
 	"gt =>branch=>branch_to=>target" => "gt =>7"
 	(12 branch:20 branch_to:60 branch2:70 target:100)
 	"xor =>branch=>branch_to=>branch2=>target" => "xor =>8"
 	(12 branch:18 branch_to:60 branch2:70 branch_to2:100 target:120)
-	"ror =>branch=>branch_to=>branch2=>branch_to2=>target" => "ror =>17"
+	"and =>branch=>branch_to=>branch2=>branch_to2=>target" => "and =>17"
 }

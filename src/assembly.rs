@@ -762,8 +762,6 @@ map_mnemonics! {
 		refl = ReferenceParser<10>
 	}
 	//                                                          MOD    FUNC
-	"rol"(Alu(AluVariant::RotateLeft, ref1))      [ 0 [ref1:5] 0 0 0  1 0 1  0 0 0 1 ]
-	"ror"(Alu(AluVariant::RotateRight, ref1))     [ 0 [ref1:5] 1 1 1  1 0 1  0 0 0 1 ]
 	"and"(Alu(AluVariant::BitAnd, ref1))          [ 0 [ref1:5] 0 0 0  0 0 1  0 0 0 1 ]
 	"or"(Alu(AluVariant::BitOr, ref1))            [ 0 [ref1:5] 0 0 0  0 1 1  0 0 0 1 ]
 	"xor"(Alu(AluVariant::BitXor, ref1))          [ 0 [ref1:5] 1 1 1  0 1 1  0 0 0 1 ]

@@ -6,7 +6,7 @@ use variant_count::VariantCount;
 duplicate! {
 	[
 		name 					variants;
-		[AluVariant]			[Add, Sub, RotateLeft, RotateRight, BitAnd, BitOr, BitXor, Equal, LessThan, GreaterThan, IsNar, NarTo];
+		[AluVariant]			[Add, Sub, BitAnd, BitOr, BitXor, Equal, LessThan, GreaterThan, IsNar, NarTo];
 		[Alu2Variant]			[Add, Sub, Multiply, ShiftLeft, ShiftRight, Division];
 		[Alu2OutputVariant]		[High, Low, FirstLow, FirstHigh, NextHigh, NextLow];
 		[CallVariant]			[Ret, Call];
