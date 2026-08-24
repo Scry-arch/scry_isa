@@ -271,3 +271,108 @@ pub enum Instruction
 	/// 0. Output offset.
 	Cast(Bits<4, false>, Bits<5, false>),
 }
+
+impl Instruction
+{
+	/// Returns the output references of all outputs of this instruction.
+	///
+	/// Each value is an output offset, where 0 is an output to the next
+	/// instruction, 1 is to the second instructions and so on. May have
+	/// multiple outputs to the same instruction. Does not guarantee that the
+	/// number of outputs is equal the length of the returned array.
+	/// E.g., the call instruction will only have 1 output reference, even if it
+	/// returns multiple values.
+	///
+	/// The order is not meaningful
+	pub fn out_refs(&self) -> Vec<usize>
+	{
+		use Instruction::*;
+		match self
+		{
+			Invalid(_) | Jump(_, _) | Trap | Store | StoreStack(_) | NoOp | StackRes(_, _, _) =>
+			{
+				vec![]
+			},
+
+			Duplicate(n, o1, o2) | Echo(n, o1, o2) =>
+			{
+				let mut res = vec![o1.value as usize, o2.value as usize];
+				if *n
+				{
+					res.push(0);
+				}
+				res
+			},
+			EchoLong(o) => vec![o.value as usize],
+			Alu(_, o) | Pick(o) | PickI(_, o) | Cast(_, o) => vec![o.value as usize],
+			Alu2(_, ot, o) =>
+			{
+				let mut res = vec![o.value as usize];
+				if matches!(ot, Alu2OutputVariant::HighNext | Alu2OutputVariant::LowNext)
+				{
+					res.push(0);
+				}
+				res
+			},
+			Call(_, _)
+			| Load(_, _)
+			| LoadStack(_, _)
+			| StackAddr(_, _)
+			| Constant(_, _)
+			| Grow(_) => vec![0],
+		}
+	}
+}
+
+#[cfg(test)]
+mod test
+{
+	use crate::{Alu2OutputVariant, Instruction};
+	use quickcheck_macros::quickcheck;
+
+	/// Tests Instruction::out_refs returns the correct number of references.
+	#[quickcheck]
+	fn out_refs_count(inst: Instruction)
+	{
+		use crate::Instruction::*;
+		let expected_count = match inst
+		{
+			Invalid(_) | Jump(_, _) | Trap | Store | StoreStack(_) | NoOp | StackRes(_, _, _) => 0,
+
+			Duplicate(n, _, _) | Echo(n, _, _) =>
+			{
+				if n
+				{
+					3
+				}
+				else
+				{
+					2
+				}
+			},
+			EchoLong(_)
+			| Alu(_, _)
+			| Pick(_)
+			| PickI(_, _)
+			| Cast(_, _)
+			| Call(_, _)
+			| Load(_, _)
+			| LoadStack(_, _)
+			| StackAddr(_, _)
+			| Constant(_, _)
+			| Grow(_) => 1,
+			Alu2(_, ot, _) =>
+			{
+				if matches!(ot, Alu2OutputVariant::HighNext | Alu2OutputVariant::LowNext)
+				{
+					2
+				}
+				else
+				{
+					1
+				}
+			},
+		};
+		assert_eq!(expected_count, inst.out_refs().len());
+	}
+}
