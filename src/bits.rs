@@ -8,7 +8,7 @@ use std::{
 pub trait BitValue: TryFrom<i32, Error = ()>
 {
 	/// The number of bits needed to represent this value
-	const SIZE: u32;
+	const WIDTH: u32;
 
 	/// Whether this value is a signed integer
 	const SIGNED: bool;
@@ -30,6 +30,18 @@ pub trait BitValue: TryFrom<i32, Error = ()>
 	fn is_min(&self) -> bool
 	{
 		self.value() == Self::get_min().value()
+	}
+
+	/// The number of bits needed to represent this value
+	fn width(&self) -> u32
+	{
+		Self::WIDTH
+	}
+
+	/// Whether this value is a signed integer
+	fn signed(&self) -> bool
+	{
+		Self::SIGNED
 	}
 }
 
@@ -65,7 +77,7 @@ impl<const N: u32, const SIGNED: bool> Bits<N, SIGNED>
 impl<const N: u32, const SIGNED: bool> BitValue for Bits<N, SIGNED>
 {
 	const SIGNED: bool = SIGNED;
-	const SIZE: u32 = N;
+	const WIDTH: u32 = N;
 
 	fn value(&self) -> i32
 	{
@@ -282,7 +294,7 @@ impl<B: BitValue, const EXCLUDED: i32> TryFrom<i32> for Exclude<B, EXCLUDED>
 impl<B: BitValue, const EXCLUDED: i32> BitValue for Exclude<B, EXCLUDED>
 {
 	const SIGNED: bool = false;
-	const SIZE: u32 = 0;
+	const WIDTH: u32 = 0;
 
 	fn value(&self) -> i32
 	{
