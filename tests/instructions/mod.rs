@@ -29,7 +29,8 @@ fn test_case<'a, F, B>(
 	Instruction::print(&instr, &mut buff).unwrap();
 	assert_eq!(buff, expected_asm, "From: \"{}\"", source_asm);
 
-	// Check that if we encode the instruction, we decode it to the same instruction
+	// Check that if we encode the instruction, we decode it to the same
+	// instruction
 	let encoded = instr.encode();
 	let decoded = Instruction::decode(encoded);
 	assert_eq!(instr, decoded, "Error in encode/decode.");

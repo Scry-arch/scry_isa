@@ -114,8 +114,8 @@ pub struct ParseError<'a>
 }
 impl<'a> ParseError<'a>
 {
-	// Create error pointing to the given token, with the given token and index char
-	// starting points
+	// Create error pointing to the given token, with the given token and index
+	// char starting points
 	pub fn from_token(
 		token: &str,
 		token_idx: usize,
@@ -481,12 +481,17 @@ impl<'a> Parser<'a> for typ
 		B: Borrow<F>,
 		F: Fn(Resolve<'a>) -> Result<i32, &'a str>,
 	{
-		let value_string = tokens.next()
+		let value_string = tokens
+			.next()
 			.ok_or(ParseError::from_no_span(ParseErrorType::EndOfStream))
 			// Extract digits from beginning
-			.map(|t| t.splitn(2, |c| {
-				!char::is_digit(c, 10) && (typ::MIN == 0 || (c != '-'))
-			}).next().unwrap())?;
+			.map(|t| {
+				t.splitn(2, |c| {
+					!char::is_digit(c, 10) && (typ::MIN == 0 || (c != '-'))
+				})
+				.next()
+				.unwrap()
+			})?;
 		value_string
 			.parse()
 			.map(|v| (v, CanConsume::chars(value_string.len())))
@@ -847,44 +852,47 @@ impl<'a> Parser<'a> for ReferenceNodeParser<'a>
 		Pipe::parse::<_, F, _>(tokens.clone(), f)
 			.map(|(_, consumed)| (ReferenceNodeParser::CallArgFlag, consumed))
 			.priority_error(false)
-
 			// Accept positive integer as manual offset
 			.or_else(|_| {
 				u16::parse::<_, F, _>(tokens.clone(), f)
 					.map(|(val, consumed)| (ReferenceNodeParser::Offset(val as i32), consumed))
 			})
 			.priority_error(false)
-
 			.or_else(|_| {
-
 				// Accept a symbol
 				Symbol::parse::<_, F, _>(tokens.clone(), f)
 					.priority_error(false)
 					.map_or_else(
-
-						// If not a symbol try accepting a branch within parentheses
-						|_|{
-							// We need to call ReferenceDAGParser to parse the branched references
-							// However, it calls ReferenceNode for parsing already, resulting
-							// In an infinite type checking recursion. To avoid this, we need to
-							// use dynamic dispatch with the token iterator to break the recursion.
-							// However, since it needs Clone, and that would mean I is not object-safe,
-							// we use 'dyn_clone' to create an object safe version of I that can be boxed.
-							// See here: https://stackoverflow.com/a/50785654/8171453
+						// If not a symbol try accepting a branch within
+						// parentheses
+						|_| {
+							// We need to call ReferenceDAGParser to parse the
+							// branched references However, it calls
+							// ReferenceNode for parsing already, resulting
+							// In an infinite type checking recursion. To avoid
+							// this, we need to use dynamic dispatch with the
+							// token iterator to break the recursion.
+							// However, since it needs Clone, and that would
+							// mean I is not object-safe, we use 'dyn_clone' to
+							// create an object safe version of I that can be
+							// boxed. See here: https://stackoverflow.com/a/50785654/8171453
 							use dyn_clone::{clone_trait_object, DynClone};
 							trait CloneableIterator<'b>: Iterator<Item = &'b str> + DynClone {}
 							impl<'b, T: Iterator<Item = &'b str> + DynClone> CloneableIterator<'b> for T {}
 							clone_trait_object!(<'b> CloneableIterator<'b>);
 
-							// We don't use one big "Then<..>" parse because we need to capture
-							// exact consumes for the two branches. So, we do everything manually
+							// We don't use one big "Then<..>" parse because we
+							// need to capture exact consumes for the two
+							// branches. So, we do everything manually
 							ParenLeft::parse::<_, F, _>(tokens.clone(), f)
 								.priority_error(false)
-								.and_then(move|(_, left_consume)|{
-									let (left_consumed, tokens2) = left_consume.advance_iter(tokens.clone());
-									let tokens2_box: Box<dyn CloneableIterator<'a>> = Box::new(tokens2);
+								.and_then(move |(_, left_consume)| {
+									let (left_consumed, tokens2) =
+										left_consume.advance_iter(tokens.clone());
+									let tokens2_box: Box<dyn CloneableIterator<'a>> =
+										Box::new(tokens2);
 									ReferenceDAGParser::<false>::parse::<_, F, _>(tokens2_box, f)
-										.and_then(|(ref1, ref1_consume)|{
+										.and_then(|(ref1, ref1_consume)| {
 											Ok((tokens, ref1, left_consumed.then(&ref1_consume)))
 										})
 										.map_err(|mut err| {
@@ -894,10 +902,15 @@ impl<'a> Parser<'a> for ReferenceNodeParser<'a>
 										.priority_error(true)
 								})
 								.and_then(|(tokens, ref_node, consume)| {
-									let (par_ref1_consumed, tokens3) = consume.advance_iter(tokens.clone());
+									let (par_ref1_consumed, tokens3) =
+										consume.advance_iter(tokens.clone());
 									Comma::parse::<_, F, _>(tokens3, f)
 										.and_then(|(_, comma_consume)| {
-											Ok((tokens, ref_node, par_ref1_consumed.then(&comma_consume)))
+											Ok((
+												tokens,
+												ref_node,
+												par_ref1_consumed.then(&comma_consume),
+											))
 										})
 										.map_err(|mut err| {
 											par_ref1_consumed.advance_err(&mut err);
@@ -906,13 +919,19 @@ impl<'a> Parser<'a> for ReferenceNodeParser<'a>
 										.priority_error(true)
 								})
 								.and_then(|(tokens, mut ref_dag, consume)| {
-									let (left_ref1_comma_consumed, tokens4) = consume.advance_iter(tokens.clone());
-									let tokens4_boxed: Box<dyn CloneableIterator<'a>> = Box::new(tokens4);
+									let (left_ref1_comma_consumed, tokens4) =
+										consume.advance_iter(tokens.clone());
+									let tokens4_boxed: Box<dyn CloneableIterator<'a>> =
+										Box::new(tokens4);
 									ReferenceDAGParser::<false>::parse::<_, F, _>(tokens4_boxed, f)
-										.and_then(|(ref2, ref2_consume)|{
+										.and_then(|(ref2, ref2_consume)| {
 											let _ = ref_dag.add_ref_dag(None, &ref2);
 
-											Ok((tokens, ref_dag, left_ref1_comma_consumed.then(&ref2_consume)))
+											Ok((
+												tokens,
+												ref_dag,
+												left_ref1_comma_consumed.then(&ref2_consume),
+											))
 										})
 										.map_err(|mut err| {
 											left_ref1_comma_consumed.advance_err(&mut err);
@@ -924,7 +943,12 @@ impl<'a> Parser<'a> for ReferenceNodeParser<'a>
 								.and_then(|(tokens, ref_dag, consume)| {
 									let (consumed, tokens2) = consume.advance_iter(tokens.clone());
 									ParenRight::parse::<_, F, _>(tokens2, f)
-										.map(|(_, consume2)| (ReferenceNodeParser::Branch(ref_dag), consumed.then(&consume2)))
+										.map(|(_, consume2)| {
+											(
+												ReferenceNodeParser::Branch(ref_dag),
+												consumed.then(&consume2),
+											)
+										})
 										.map_err(|mut err| {
 											consumed.advance_err(&mut err);
 											err
@@ -932,25 +956,31 @@ impl<'a> Parser<'a> for ReferenceNodeParser<'a>
 										.priority_error(true)
 								})
 						},
-
 						// Ensure symbol is known
-						|(sym, consumed)|{
-							f(Resolve::Address(sym)).map_err(|_| {
-								ParseError::from_consumed(
-									consumed.clone(),
-									ParseErrorType::UnknownSymbol,
-								)
-							}).priority_error(true)?;
+						|(sym, consumed)| {
+							f(Resolve::Address(sym))
+								.map_err(|_| {
+									ParseError::from_consumed(
+										consumed.clone(),
+										ParseErrorType::UnknownSymbol,
+									)
+								})
+								.priority_error(true)?;
 
 							Ok((ReferenceNodeParser::Symbol(sym), consumed))
-						}
+						},
 					)
 			})
 			.map_err(|err| {
-				if err.is_primary() {
+				if err.is_primary()
+				{
 					err.get()
-				} else {
-					ParseError::from_no_span(ParseErrorType::UnexpectedChars("'|', '(', unsigned integer, or symbol"))
+				}
+				else
+				{
+					ParseError::from_no_span(ParseErrorType::UnexpectedChars(
+						"'|', '(', unsigned integer, or symbol",
+					))
 				}
 			})
 	}
@@ -1101,8 +1131,8 @@ impl<'a> ReferenceDAG<'a>
 					.map(|v| v.into_iter())
 			})
 			.chain(
-				// 1-node paths will not produce a path in the above all_simple_paths call, so add
-				// them here as their own path
+				// 1-node paths will not produce a path in the above
+				// all_simple_paths call, so add them here as their own path
 				leaves.filter_map(|l| {
 					if self.get_roots().find(|r| *r == l).is_some()
 					{
@@ -1298,8 +1328,8 @@ impl<'a, const INIT_ARROW: bool> Parser<'a> for ReferenceDAGParser<INIT_ARROW>
 			Ok((nodes, consumed)) => (nodes, consumed),
 			Err(err) =>
 			{
-				// Accept lone arrow as "=>0", but only if not followed by "(", which means
-				// there is a branch
+				// Accept lone arrow as "=>0", but only if not followed by "(",
+				// which means there is a branch
 				if let (true, Ok((_, consumed)), Err(_)) = (
 					INIT_ARROW,
 					Arrow::parse::<_, F, _>(tokens.clone(), f),
@@ -1433,7 +1463,8 @@ impl<'a, P1: 'a + Parser<'a>, P2: 'a + Parser<'a>> Parser<'a> for Then<'a, P1, P
 
 				match P2::parse::<_, F, _>(iter, f)
 				{
-					// If P2 didn't consume anything, report the raw consumed of P1
+					// If P2 didn't consume anything, report the raw consumed of
+					// P1
 					Ok((result2, con)) if con == CanConsume::none() =>
 					{
 						Ok(((result1, result2), can_consumed1))

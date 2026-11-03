@@ -392,14 +392,14 @@ fn different_separator_tokenization(
 			let next_separator_type = separator_types.next().unwrap();
 			match next_separator_type
 			{
-				// Remove any spaces before the separator to ensure it stays in the same token as
-				// preceding text
+				// Remove any spaces before the separator to ensure it stays in
+				// the same token as preceding text
 				SeparatorType::AtEnd | SeparatorType::InMiddle =>
 				{
 					edited_assembly.push_str(split1.trim_end())
 				},
-				// Add a space before separator to ensure it is separated into a different token
-				// Than preceding text
+				// Add a space before separator to ensure it is separated into a
+				// different token Than preceding text
 				_ =>
 				{
 					edited_assembly.push_str(split1);
@@ -410,11 +410,11 @@ fn different_separator_tokenization(
 			let after_separator = split2.split_at(separator.len()).1;
 			rest = match next_separator_type
 			{
-				// Remove any spaces after the separator to ensure it stays in the same token as
-				// succeeding text
+				// Remove any spaces after the separator to ensure it stays in
+				// the same token as succeeding text
 				SeparatorType::AtStart | SeparatorType::InMiddle => after_separator.trim_start(),
-				// Add a space after separator to ensure it is separated into a different token
-				// than succeeding text
+				// Add a space after separator to ensure it is separated into a
+				// different token than succeeding text
 				_ =>
 				{
 					edited_assembly.push(' ');

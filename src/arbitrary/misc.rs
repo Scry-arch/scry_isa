@@ -67,7 +67,8 @@ pub fn offset_index(instr: &Instruction) -> impl Iterator<Item = usize>
 	{
 		Jump(..) => [1, 2].iter(),
 		Call(..) => [1].iter(),
-		// We don't use the wildcard match to not forget to add instructions above
+		// We don't use the wildcard match to not forget to add instructions
+		// above
 		Echo(..) | EchoLong(..) | Alu(..) | Alu2(..) | Duplicate(..) | Pick(..) | PickI(..)
 		| Load(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Invalid(..) | Constant(..)
 		| StackAddr(..) | StackRes(..) | Trap | Grow(..) | Cast(..) => [].iter(),
@@ -123,7 +124,8 @@ pub fn references(instr: &Instruction) -> impl Iterator<Item = (usize, i32)>
 		| Alu2(_, Alu2OutputVariant::LowOnly, b)
 		| Alu2(_, Alu2OutputVariant::HighOnly, b) => vec![(2, b.value())],
 		Load(_, b) | Cast(_, b) => vec![(2, b.value())],
-		// We don't use the wildcard match to not forget to add instructions above
+		// We don't use the wildcard match to not forget to add instructions
+		// above
 		Jump(..) | Call(..) | LoadStack(..) | Store | StoreStack(..) | NoOp | Invalid(..)
 		| Constant(..) | StackAddr(..) | StackRes(..) | Trap | Grow(..) =>
 		{
@@ -415,8 +417,8 @@ impl OperandSubstitutions
 			{
 				if value == 0 && bool::arbitrary(g)
 				{
-					// Sometimes omit the symbol for referencing the next instruction
-					// i.e. "=>0" becomes "=>"
+					// Sometimes omit the symbol for referencing the next
+					// instruction i.e. "=>0" becomes "=>"
 					result.subs.insert(idx, SubType::Ref(vec![]));
 				}
 				else
@@ -461,11 +463,12 @@ impl OperandSubstitutions
 						let value_left = value - offset_count;
 						if last_was_offset
 						{
-							// 10% chance of adding call argument flag, otherwise a jump
+							// 10% chance of adding call argument flag,
+							// otherwise a jump
 							if u8::arbitrary(g) % 10 == 0
 							{
-								// argument flags can only split an offset, so add one before the
-								// last offset
+								// argument flags can only split an offset, so
+								// add one before the last offset
 								insert_penultimate_sym(&mut result, None);
 								offset_count += 1;
 							}
@@ -481,8 +484,9 @@ impl OperandSubstitutions
 						}
 						else
 						{
-							// Last was either a jump or a call argument flag, next must therefore
-							// be offset 50% chance of not using all value, so need more links
+							// Last was either a jump or a call argument flag,
+							// next must therefore be offset 50% chance of not
+							// using all value, so need more links
 							let next_offset = if bool::arbitrary(g)
 							{
 								value_left
@@ -554,10 +558,11 @@ impl<I: ArbInstruction> AssemblyInstruction<I>
 				{
 					// Extract reference value
 					let split = tokens[*idx]
-							// remove the preceding '=>'
-							.split_at(2).1
-							// potentially remove ',' at end
-							.split_at(tokens[*idx].find(",").unwrap_or(tokens[*idx].len())-2);
+						// remove the preceding '=>'
+						.split_at(2)
+						.1
+						// potentially remove ',' at end
+						.split_at(tokens[*idx].find(",").unwrap_or(tokens[*idx].len()) - 2);
 
 					// replace reference with symbols
 					let mut replacement = String::new();
@@ -708,7 +713,8 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 						let value_zero = references(&self.instruction)
 							.find(|(i, _)| i == idx)
 							.unwrap()
-							.1 == 0;
+							.1
+							== 0;
 						if value_zero && refs.len() > 1
 						{
 							let mut instr_clone = self.instruction.clone();
@@ -717,9 +723,11 @@ impl<I: ArbInstruction> Arbitrary for AssemblyInstruction<I>
 							if refs.len() >= 2
 								&& refs.get(refs.len() - 2).map_or(false, Option::is_none)
 							{
-								// Second to last is call argument flag, remove it
+								// Second to last is call argument flag, remove
+								// it
 								assert!(refs_clone.remove(refs.len() - 2).is_none());
-								// Increase the last link's address to compensate
+								// Increase the last link's address to
+								// compensate
 								let last_sym =
 									refs_clone.last().as_ref().unwrap().as_ref().unwrap();
 								substitutions_clone.change_address_of(
